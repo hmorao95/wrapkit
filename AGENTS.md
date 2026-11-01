@@ -7,9 +7,9 @@ Instructions for AI coding agents working in this repository.
 `wrapkit` is the shared infrastructure of the data-API wrappers in
 `github.com/hmorao95` (logging and redaction, disk cache, retries and throttle,
 tidy frames, incremental updates, file output, python-fire helpers). The
-wrappers depend on it by git tag. The repository is private, but keep it to
-generic code anyway: never a key, token, endpoint secret or anything specific
-to one data source.
+wrappers depend on it by git tag. The repository is public: it must only hold
+generic code, never a key, token, endpoint secret or anything specific to one
+data source.
 
 Layout: `src/wrapkit/` (one module per area, see the README), `tests/`
 (network-free pytest suite).

@@ -11,9 +11,8 @@ parsing and each wrapper's public API stay in the wrapper.
 
 ## Install
 
-wrapkit is a private repository, installed from GitHub and pinned to a release
-tag. Installing it needs read access to the repository (your own git
-credentials locally; a token in CI, see below):
+wrapkit is installed from GitHub, pinned to a release tag (no credentials
+needed):
 
 ```bash
 pip install "wrapkit @ git+https://github.com/hmorao95/wrapkit@v0.1.0"
@@ -26,15 +25,6 @@ dependencies = ["wrapkit @ git+https://github.com/hmorao95/wrapkit@v0.1.0"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
-```
-
-In a wrapper's CI, give git a read token before `uv sync`. Store a fine-grained
-personal access token with read-only *Contents* access to `hmorao95/wrapkit` as
-the repository secret `WRAPKIT_TOKEN`, then:
-
-```yaml
-- name: Allow access to wrapkit
-  run: git config --global url."https://x-access-token:${{ secrets.WRAPKIT_TOKEN }}@github.com/hmorao95/wrapkit".insteadOf "https://github.com/hmorao95/wrapkit"
 ```
 
 ## Modules
