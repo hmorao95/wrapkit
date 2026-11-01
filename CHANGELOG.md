@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-01
+
+### Added
+
+- `wrapkit.cli.run` takes `error_prefix` (default `"Error"`) and
+  `failure_message` (default `"Command failed"`), so a CLI in another language
+  prints and logs its own words (ine-pt-api uses Portuguese). The
+  defaults keep 0.1.0's output.
+
 ### Changed
 
 - `pre-commit` is no longer a dev dependency: run the hooks with
@@ -30,5 +39,6 @@ All notable changes to this project are documented here. The format follows
 - `wrapkit.cli`: `resolve_out`, `as_text`, `bind_bool_flags`,
   `literal_keeping_codes`, `set_parse_fns`, `run`.
 
-[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/hmorao95/wrapkit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hmorao95/wrapkit/releases/tag/v0.1.0
