@@ -1,0 +1,153 @@
+"""Tests for :mod:`wrapkit.log`."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+import pytest
+
+from wrapkit import log
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
+
+@pytest.fixture
+def logger() -> Iterator[logging.Logger]:
+    """
+    Yield a fresh logger and remove its handlers and filters afterwards.
+
+    Yields:
+        logging.Logger: The logger ``wrapkit_test``.
+    """
+    lg = log.package_logger("wrapkit_test")
+    yield lg
+    for handler in list(lg.handlers):
+        lg.removeHandler(handler)
+        handler.close()
+    for flt in list(lg.filters):
+        lg.removeFilter(flt)
+    lg.setLevel(logging.NOTSET)
+
+
+def test_package_logger_adds_one_null_handler(logger: logging.Logger) -> None:
+    """Calling it twice keeps a single NullHandler."""
+    again = log.package_logger("wrapkit_test")
+    assert again is logger
+    nulls = [h for h in logger.handlers if isinstance(h, logging.NullHandler)]
+    assert len(nulls) == 1
+
+
+def test_redact_masks_param_and_registered_secret() -> None:
+    """The parameter value and registered secrets become ***."""
+    flt = log.RedactFilter(["api_key"])
+    flt.register("SECRETSECRET")
+    text = "GET /x?api_key=abc&y=1 used SECRETSECRET"
+    assert flt.redact(text) == "GET /x?api_key=***&y=1 used ***"
+
+
+def test_redact_word_boundary() -> None:
+    """``key`` does not match inside ``api_key``."""
+    flt = log.RedactFilter(["key"])
+    assert flt.redact("?api_key=abc&key=def") == "?api_key=abc&key=***"
+
+
+def test_redact_without_params_only_masks_secrets() -> None:
+    """With no parameter names only registered secrets are masked."""
+    flt = log.RedactFilter()
+    flt.register("longsecret1")
+    assert flt.redact("a=1 longsecret1") == "a=1 ***"
+
+
+def test_register_ignores_short_and_none() -> None:
+    """Short or missing secrets are not registered."""
+    flt = log.RedactFilter()
+    flt.register(None)
+    flt.register("short")
+    assert flt.secrets == set()
+
+
+def test_filter_freezes_cleaned_message(
+    logger: logging.Logger, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A record with a secret is rewritten; others pass untouched."""
+    flt = log.RedactFilter(["token"])
+    logger.addFilter(flt)
+    logger.propagate = True
+    with caplog.at_level(logging.DEBUG, logger="wrapkit_test"):
+        logger.warning("url %s", "https://h/?token=zzz")
+        logger.warning("plain %s", "text")
+    assert caplog.records[0].getMessage() == "url https://h/?token=***"
+    assert caplog.records[0].args == ()
+    assert caplog.records[1].args == ("text",)
+
+
+def test_install_attaches_once() -> None:
+    """install() covers the HTTP loggers and extra names, without duplicates."""
+    flt = log.RedactFilter(["api_key"])
+    try:
+        assert flt.install("wrapkit_test") is flt
+        flt.install("wrapkit_test")
+        for name in (*log.HTTP_LOGGERS, "wrapkit_test"):
+            assert logging.getLogger(name).filters.count(flt) == 1
+    finally:
+        for name in (*log.HTTP_LOGGERS, "wrapkit_test"):
+            logging.getLogger(name).removeFilter(flt)
+
+
+def test_loggable_hides_names() -> None:
+    """Hidden parameters are left out of the log text."""
+    params = [("api_key", "s"), ("a", "1"), ("b", "2")]
+    assert log.loggable(params, ["api_key"]) == "a=1&b=2"
+
+
+def test_configure_logging_rejects_unknown_level(logger: logging.Logger) -> None:
+    """An unknown level fails before any handler is touched."""
+    with pytest.raises(ValueError, match="log_level must be one of"):
+        log.configure_logging(logger, "loud")
+
+
+def test_configure_logging_replaces_its_handlers(logger: logging.Logger) -> None:
+    """A second call replaces the CLI handlers instead of stacking them."""
+    log.configure_logging(logger, "INFO")
+    log.configure_logging(logger, "debug")
+    ours = [h for h in logger.handlers if getattr(h, log.CLI_HANDLER_FLAG, False)]
+    assert len(ours) == 1
+    assert logger.level == logging.DEBUG
+
+
+def test_configure_logging_custom_flag(logger: logging.Logger) -> None:
+    """The marker attribute can be chosen by the caller."""
+    log.configure_logging(logger, "WARNING", flag="_mine")
+    assert any(getattr(h, "_mine", False) for h in logger.handlers)
+    assert logger.level == logging.WARNING
+
+
+def test_file_log_is_plain_debug(logger: logging.Logger, tmp_path: Path) -> None:
+    """The file gets DEBUG records and tracebacks with no ANSI codes."""
+    path = tmp_path / "run.log"
+    log.configure_logging(logger, "ERROR", str(path))
+    logger.debug("detail")
+    try:
+        msg = "boom"
+        raise RuntimeError(msg)  # ruff: ignore[raise-within-try]
+    except RuntimeError:
+        logger.exception("failed")
+    for handler in logger.handlers:
+        handler.flush()
+    text = path.read_text("utf-8")
+    assert "detail" in text
+    assert "RuntimeError: boom" in text
+    assert "\x1b[" not in text
+    assert logger.level == logging.DEBUG
+
+
+def test_plain_formatter_restores_cache() -> None:
+    """The cached traceback text is put back after formatting."""
+    record = logging.LogRecord("n", logging.ERROR, __file__, 1, "m", (), None)
+    record.exc_text = "cached"
+    out = log.PlainFormatter("%(message)s").format(record)
+    assert out == "m"
+    assert record.exc_text == "cached"

@@ -1,0 +1,27 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
+[Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-11-01
+
+### Added
+
+- `wrapkit.log`: package logger, CLI console and file handlers, plain-text file
+  tracebacks, secret redaction on the HTTP loggers.
+- `wrapkit.cache`: `DEFAULT_CACHE_DIR`, `resolve_cache_dir`, `cache_path`,
+  `DiskCache`.
+- `wrapkit.http`: `RetryPolicy`, `get_with_retries`, `aget_with_retries`,
+  `Throttle`, `AsyncThrottle`, `user_agent`.
+- `wrapkit.frames`: tidy-shape helpers, `as_polars`, `snake`, `period_start`,
+  `period_end`.
+- `wrapkit.incremental`: `key_strings`, `select_new`, `read_existing`, `upsert`.
+- `wrapkit.io`: `write_frame`, `frame_format`.
+- `wrapkit.cli`: `resolve_out`, `as_text`, `bind_bool_flags`,
+  `literal_keeping_codes`, `set_parse_fns`, `run`.
+
+[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/hmorao95/wrapkit/releases/tag/v0.1.0
