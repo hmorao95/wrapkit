@@ -26,7 +26,6 @@ Repository = "https://github.com/hmorao95/wrapkit"
 
 [dependency-groups]
 dev = [
-    "pre-commit>=3.6",
     "ruff>=0.4.8",
     "mypy>=1.8",
     "ty>=0.0.1a1",
