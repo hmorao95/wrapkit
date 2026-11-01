@@ -143,4 +143,28 @@ def test_run_expected_error(
         cli.run(_Tool, name="tool", logger=lg, expected=(ValueError,), argv=["fail"])
     assert info.value.code == 1
     assert capsys.readouterr().err.strip() == "Error: bad input"
+    assert "Command failed" in caplog.text
     assert "Traceback" in caplog.text
+
+
+def test_run_expected_error_in_the_callers_words(
+    capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The printed prefix and the log line can be given in another language."""
+    lg = logging.getLogger("wrapkit_cli_test")
+    with (
+        caplog.at_level(logging.DEBUG, logger="wrapkit_cli_test"),
+        pytest.raises(SystemExit),
+    ):
+        cli.run(
+            _Tool,
+            name="tool",
+            logger=lg,
+            expected=(ValueError,),
+            argv=["fail"],
+            error_prefix="Fehler",
+            failure_message="Befehl fehlgeschlagen",
+        )
+    assert capsys.readouterr().err.strip() == "Fehler: bad input"
+    assert "Befehl fehlgeschlagen" in caplog.text
+    assert "Command failed" not in caplog.text

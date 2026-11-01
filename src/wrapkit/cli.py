@@ -168,9 +168,14 @@ def run(
     expected: tuple[type[BaseException], ...],
     argv: list[str] | None = None,
     bool_flags: Iterable[str] = (),
+    error_prefix: str = "Error",
+    failure_message: str = "Command failed",
 ) -> None:
     """
     Run a Fire CLI, turning expected errors into a short message and exit 1.
+
+    The two texts a user sees come from the caller, so a wrapper whose CLI
+    speaks another language keeps it (``error_prefix="Fehler"``).
 
     Args:
         cli (type): The CLI class (Fire instantiates it with the global flags).
@@ -182,6 +187,9 @@ def run(
             ``sys.argv[1:]`` when ``None``.
         bool_flags (Iterable[str]): Boolean flags to pin with
             :func:`bind_bool_flags`.
+        error_prefix (str): Printed before an expected error's message, as
+            ``<prefix>: <message>``.
+        failure_message (str): The DEBUG log line that carries the traceback.
 
     Raises:
         SystemExit: With code 1 after an expected error; Fire also raises it
@@ -193,6 +201,6 @@ def run(
     try:
         fire.Fire(cli, name=name, command=bind_bool_flags(args, bool_flags))
     except expected as exc:
-        logger.debug("Command failed", exc_info=True)
-        print(f"Error: {exc}", file=sys.stderr)  # ruff: ignore[print]
+        logger.debug(failure_message, exc_info=True)
+        print(f"{error_prefix}: {exc}", file=sys.stderr)  # ruff: ignore[print]
         raise SystemExit(1) from exc
