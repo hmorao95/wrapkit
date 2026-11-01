@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `pre-commit` is no longer a dev dependency: run the hooks with
+  `uvx pre-commit` (for example `uvx pre-commit install`). This drops
+  `virtualenv` and `filelock` from `uv.lock`; filelock has no patched release
+  for Python 3.10.
+
 ## [0.1.0] - 2026-11-01
 
 ### Added
