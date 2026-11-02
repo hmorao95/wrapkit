@@ -52,8 +52,7 @@ Do not weaken the gate to make it pass.
 ## Git and releases
 
 - Branch, open a PR, squash-merge once CI is green.
-- **Commit as the repo owner. Never add a Co-Authored-By / AI-authorship trailer
-  to commits, tags or PRs.**
+- **Commit as the repo owner.**
 - Releasing: move `[Unreleased]` under `## [X.Y.Z] - <date>`, bump the version
   in `pyproject.toml` and `src/wrapkit/__init__.py`, `uv lock`, merge, then
   `git tag -a vX.Y.Z` and `gh release create vX.Y.Z`. Wrappers then bump their
