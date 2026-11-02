@@ -21,7 +21,7 @@ import inspect
 import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import logging
@@ -170,7 +170,7 @@ def run(
     bool_flags: Iterable[str] = (),
     error_prefix: str = "Error",
     failure_message: str = "Command failed",
-) -> None:
+) -> Any:  # ruff: ignore[any-type] - whatever the command returns
     """
     Run a Fire CLI, turning expected errors into a short message and exit 1.
 
@@ -191,6 +191,10 @@ def run(
             ``<prefix>: <message>``.
         failure_message (str): The DEBUG log line that carries the traceback.
 
+    Returns:
+        Any: What the command returned, as ``fire.Fire`` gives it back (Fire
+        has already printed it).
+
     Raises:
         SystemExit: With code 1 after an expected error; Fire also raises it
             for usage errors.
@@ -199,7 +203,7 @@ def run(
 
     args = list(sys.argv[1:] if argv is None else argv)
     try:
-        fire.Fire(cli, name=name, command=bind_bool_flags(args, bool_flags))
+        return fire.Fire(cli, name=name, command=bind_bool_flags(args, bool_flags))
     except expected as exc:
         logger.debug(failure_message, exc_info=True)
         print(f"{error_prefix}: {exc}", file=sys.stderr)  # ruff: ignore[print]

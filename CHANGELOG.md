@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-02
+
+### Fixed
+
+- `RedactFilter.redact` masks registered secrets longest first. Before, a
+  secret that contains a shorter registered one (a password that includes the
+  user name) could be masked in pieces, leaving a fragment in the log line.
+- `configure_logging` accepts a non-string level and rejects it with its usual
+  `ValueError`. Fire turns `--log-level 10` into an int, which used to crash on
+  `.upper()`.
+- `wrapkit.cli.run` returns what the command returned, as `fire.Fire` does, so
+  a wrapper whose `main()` passes that value on can use it.
+
 ## [0.2.0] - 2026-11-01
 
 ### Added
@@ -39,6 +52,7 @@ All notable changes to this project are documented here. The format follows
 - `wrapkit.cli`: `resolve_out`, `as_text`, `bind_bool_flags`,
   `literal_keeping_codes`, `set_parse_fns`, `run`.
 
-[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/hmorao95/wrapkit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/hmorao95/wrapkit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hmorao95/wrapkit/releases/tag/v0.1.0
