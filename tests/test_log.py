@@ -61,6 +61,14 @@ def test_redact_without_params_only_masks_secrets() -> None:
     assert flt.redact("a=1 longsecret1") == "a=1 ***"
 
 
+def test_redact_masks_overlapping_secrets_whole() -> None:
+    """A secret containing a shorter one is masked whole, not in pieces."""
+    flt = log.RedactFilter()
+    for secret in ("username1", "username1-password", "1-password"):
+        flt.register(secret)
+    assert flt.redact("login username1-password") == "login ***"
+
+
 def test_register_ignores_short_and_none() -> None:
     """Short or missing secrets are not registered."""
     flt = log.RedactFilter()
@@ -107,6 +115,12 @@ def test_configure_logging_rejects_unknown_level(logger: logging.Logger) -> None
     """An unknown level fails before any handler is touched."""
     with pytest.raises(ValueError, match="log_level must be one of"):
         log.configure_logging(logger, "loud")
+
+
+def test_configure_logging_rejects_numeric_level(logger: logging.Logger) -> None:
+    """Fire turns ``--log-level 10`` into an int; it fails cleanly, no crash."""
+    with pytest.raises(ValueError, match="got 10"):
+        log.configure_logging(logger, 10)
 
 
 def test_configure_logging_replaces_its_handlers(logger: logging.Logger) -> None:

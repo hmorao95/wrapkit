@@ -126,7 +126,8 @@ class RedactFilter(logging.Filter):
         """
         if self._pattern is not None:
             text = self._pattern.sub(r"\g<1>***", text)
-        for secret in self.secrets:
+        # Longest first, so a secret that contains a shorter one is masked whole.
+        for secret in sorted(self.secrets, key=len, reverse=True):
             text = text.replace(secret, "***")
         return text
 
@@ -210,7 +211,7 @@ class PlainFormatter(logging.Formatter):
 
 def configure_logging(
     logger: logging.Logger,
-    level: str = "WARNING",
+    level: str | int = "WARNING",
     log_file: str | None = None,
     *,
     flag: str = CLI_HANDLER_FLAG,
@@ -227,8 +228,9 @@ def configure_logging(
 
     Args:
         logger (logging.Logger): The package logger.
-        level (str): Console threshold, one of ``DEBUG``, ``INFO``, ``WARNING``
-            or ``ERROR`` (case-insensitive).
+        level (str | int): Console threshold, one of ``DEBUG``, ``INFO``,
+            ``WARNING`` or ``ERROR`` (case-insensitive). Anything else, such as
+            the number Fire makes of ``--log-level 10``, is rejected.
         log_file (str | None): Path of a log file to append to, or ``None`` for
             console logging only.
         flag (str): Attribute name that marks the installed handlers.
@@ -239,7 +241,7 @@ def configure_logging(
     # Imported lazily: only a CLI needs colored output.
     import colorlog
 
-    name = level.upper()
+    name = str(level).upper()
     if name not in LOG_LEVELS:
         msg = f"log_level must be one of {', '.join(LOG_LEVELS)}, got {level!r}."
         raise ValueError(msg)

@@ -127,8 +127,9 @@ def test_set_parse_fns_and_run(
     )
     assert capsys.readouterr().out.strip() == "({'g': '01'}, True)"
     monkeypatch.setattr(sys, "argv", ["tool", "show"])
-    cli.run(_Tool, name="tool", logger=lg, expected=(ValueError,))
+    result = cli.run(_Tool, name="tool", logger=lg, expected=(ValueError,))
     assert capsys.readouterr().out.strip() == "(None, False)"
+    assert result == "(None, False)"
 
 
 def test_run_expected_error(
