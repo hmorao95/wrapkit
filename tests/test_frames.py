@@ -25,6 +25,22 @@ def test_snake(raw: str, expected: str) -> None:
     assert frames.snake(raw) == expected
 
 
+@pytest.mark.parametrize(
+    ("raw", "default", "with_acronyms"),
+    [
+        ("GDPValue", "gdpvalue", "gdp_value"),
+        ("isCAMRelevant", "is_camrelevant", "is_cam_relevant"),
+        ("tpTsoGCVMin", "tp_tso_gcvmin", "tp_tso_gcv_min"),
+        ("pointKey", "point_key", "point_key"),
+        ("ID", "id", "id"),
+    ],
+)
+def test_snake_acronyms(raw: str, default: str, with_acronyms: str) -> None:
+    """By default acronyms stay glued; ``acronyms=True`` splits them off."""
+    assert frames.snake(raw) == default
+    assert frames.snake(raw, acronyms=True) == with_acronyms
+
+
 def test_empty_tidy_dtypes() -> None:
     """The empty shape has the tidy columns and dtypes."""
     empty = frames.empty_tidy(["area", "variable"])

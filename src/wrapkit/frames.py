@@ -34,7 +34,7 @@ __all__ = [
 TIDY_VALUE_COLUMNS = ("value", "unit")
 
 
-def snake(name: str) -> str:
+def snake(name: str, *, acronyms: bool = False) -> str:
     """
     Convert a column name to snake_case.
 
@@ -42,12 +42,20 @@ def snake(name: str) -> str:
     characters into one underscore: ``stateDescription`` becomes
     ``state_description`` and ``area-name`` becomes ``area_name``.
 
+    By default a run of capitals stays glued to the next word (``GDPValue``
+    becomes ``gdpvalue``). With ``acronyms`` the run is kept as a word of its
+    own: ``GDPValue`` becomes ``gdp_value`` and ``isCAMRelevant``
+    ``is_cam_relevant``.
+
     Args:
         name (str): The raw column name.
+        acronyms (bool): Split a run of capitals from the word that follows.
 
     Returns:
         str: The lower-case snake_case name.
     """
+    if acronyms:
+        name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
     spaced = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", name)
     return re.sub(r"[^0-9A-Za-z]+", "_", spaced).strip("_").lower()
 
