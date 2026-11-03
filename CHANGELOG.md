@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-03
+
+### Added
+
+- `snake(name, acronyms=True)` keeps a run of capitals as a word of its own:
+  `GDPValue` becomes `gdp_value` and `isCAMRelevant` `is_cam_relevant`. The
+  default is unchanged (`gdpvalue`).
+- `upsert(..., numeric_cols=[...])` sorts those columns as numbers, so `9`
+  comes before `10` even when the stored rows were read back as text. Other
+  sort columns are still compared as text.
+
+### Fixed
+
+- `read_existing` treats a zero-byte CSV as no prior extract. Before, pandas
+  raised `EmptyDataError` on it.
+- `select_new` and `key_strings` build their work frames in one step. With
+  more than about 100 value columns, adding them one by one made pandas warn
+  about a fragmented frame, an error under a warnings-as-errors test setup.
+
 ## [0.2.1] - 2026-11-02
 
 ### Fixed
@@ -52,7 +71,8 @@ All notable changes to this project are documented here. The format follows
 - `wrapkit.cli`: `resolve_out`, `as_text`, `bind_bool_flags`,
   `literal_keeping_codes`, `set_parse_fns`, `run`.
 
-[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/hmorao95/wrapkit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/hmorao95/wrapkit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/hmorao95/wrapkit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hmorao95/wrapkit/releases/tag/v0.1.0

@@ -43,15 +43,16 @@ def key_strings(
         pd.DataFrame: The key columns as plain strings, same index as ``frame``.
     """
     dates = set(date_cols)
-    out = pd.DataFrame(index=frame.index)
+    columns: dict[str, pd.Series] = {}
     for col in key_cols:
         series = frame[col]
         if col in dates:
             series = pd.to_datetime(series, format="ISO8601").dt.strftime(
                 "%Y-%m-%dT%H:%M:%S"
             )
-        out[col] = series.astype("string").fillna("").astype(str)
-    return out
+        columns[col] = series.astype("string").fillna("").astype(str)
+    # Built in one go: adding many columns one by one fragments the frame.
+    return pd.DataFrame(columns, index=frame.index)
 
 
 def select_new(
@@ -87,9 +88,11 @@ def select_new(
     dates = tuple(date_cols)
     prior_cols = [c for c in value_cols if c in existing.columns]
     renamed = {c: f"_prev_{c}" for c in prior_cols}
-    left = key_strings(fresh, key_cols, date_cols=dates)
-    for col in prior_cols:
-        left[col] = fresh[col]
+    columns = dict(key_strings(fresh, key_cols, date_cols=dates).items())
+    columns.update((col, fresh[col]) for col in prior_cols)
+    # Built in one go: wide frames have hundreds of value columns, and adding
+    # them one by one makes pandas warn about a fragmented frame.
+    left = pd.DataFrame(columns, index=fresh.index)
     prior = (
         key_strings(existing, key_cols, date_cols=dates)
         .join(existing[prior_cols].rename(columns=renamed))
@@ -117,12 +120,13 @@ def read_existing(
 
     A frame is copied, so the caller's is not changed. A CSV is read as text, so
     key columns keep their exact spelling (``"01"`` stays ``"01"``); the value
-    columns are then parsed back into numbers.
+    columns are then parsed back into numbers. A missing or empty (zero-byte)
+    file counts as no prior extract.
 
     Args:
         existing (pd.DataFrame | str | Path): The prior extract or a CSV path.
-        like (pd.DataFrame): The fresh frame; a missing file gives an empty
-            frame with its columns.
+        like (pd.DataFrame): The fresh frame; a missing or empty file gives an
+            empty frame with its columns.
         value_cols (Sequence[str]): Numeric columns to parse after reading a
             CSV.
         text_cols (Iterable[str]): Columns forced to ``str`` either way (such as
@@ -133,7 +137,7 @@ def read_existing(
     """
     if isinstance(existing, (str, Path)):
         path = Path(existing)
-        if not path.exists():
+        if not path.exists() or path.stat().st_size == 0:
             return like.iloc[0:0]
         frame = pd.read_csv(path, dtype=str)
         for col in value_cols:
@@ -154,13 +158,15 @@ def upsert(
     sort_cols: Sequence[str] | None = None,
     *,
     date_cols: Iterable[str] = ("date",),
+    numeric_cols: Iterable[str] = (),
 ) -> pd.DataFrame:
     """
     Merge ``fresh`` into ``existing``, the fresh row winning on a key clash.
 
     Stored history that ``fresh`` no longer covers is kept. Date columns are
     unified to timestamps (stored ones are text after a CSV read), and rows
-    are sorted by ``sort_cols`` compared as text.
+    are sorted by ``sort_cols`` compared as text, except the ``numeric_cols``
+    among them, which are compared as numbers (so ``9`` sorts before ``10``).
 
     Args:
         existing (pd.DataFrame): The stored rows.
@@ -169,6 +175,8 @@ def upsert(
         sort_cols (Sequence[str] | None): Sort order; ``key_cols`` when
             ``None``.
         date_cols (Iterable[str]): Columns holding dates.
+        numeric_cols (Iterable[str]): Sort columns compared as numbers; values
+            that are not numbers sort last.
 
     Returns:
         pd.DataFrame: The merged rows with a fresh index.
@@ -181,7 +189,8 @@ def upsert(
         if col in combined.columns:
             combined[col] = pd.to_datetime(combined[col], format="ISO8601")
     order_cols = list(key_cols if sort_cols is None else sort_cols)
-    order = (
-        key_strings(combined, order_cols, date_cols=dates).sort_values(order_cols).index
-    )
+    sort_keys = key_strings(combined, order_cols, date_cols=dates)
+    for col in set(numeric_cols).intersection(order_cols):
+        sort_keys[col] = pd.to_numeric(combined[col], errors="coerce")
+    order = sort_keys.sort_values(order_cols).index
     return combined.loc[order].reset_index(drop=True)

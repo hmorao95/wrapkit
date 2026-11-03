@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -96,3 +97,36 @@ def test_upsert_fresh_wins_and_history_kept(tmp_path: Path) -> None:
         ["p"],
     )
     assert plain["p"].tolist() == ["1", "2"]
+
+
+def test_read_existing_empty_file(tmp_path: Path) -> None:
+    """A zero-byte CSV counts as no prior extract instead of crashing."""
+    path = tmp_path / "empty.csv"
+    path.touch()
+    out = incremental.read_existing(path, _fresh(), ["v"])
+    assert out.empty
+    assert list(out.columns) == list(_fresh().columns)
+
+
+def test_select_new_wide_frame_does_not_fragment() -> None:
+    """Hundreds of value columns are compared without a pandas warning."""
+    values = [f"m{i}" for i in range(200)]
+    stored = pd.DataFrame({"k": ["a", "b"], **{c: [1.0, 2.0] for c in values}})
+    fresh = stored.copy()
+    fresh.loc[1, "m150"] = 9.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        new = incremental.select_new(fresh, stored, ["k"], values)
+    assert new["k"].tolist() == ["b"]
+
+
+def test_upsert_numeric_sort() -> None:
+    """``numeric_cols`` sort as numbers, text from a CSV included."""
+    stored = pd.DataFrame({"code": ["10", "9"], "year": ["2024", "2024"]})
+    fresh = pd.DataFrame({"code": [100, 2], "year": ["2024", "2024"]})
+    by_text = incremental.upsert(stored, fresh, ["code", "year"], date_cols=())
+    assert [str(c) for c in by_text["code"]] == ["10", "100", "2", "9"]
+    by_number = incremental.upsert(
+        stored, fresh, ["code", "year"], date_cols=(), numeric_cols=["code"]
+    )
+    assert [str(c) for c in by_number["code"]] == ["2", "9", "10", "100"]
