@@ -93,10 +93,10 @@ def select_new(
     # Built in one go: wide frames have hundreds of value columns, and adding
     # them one by one makes pandas warn about a fragmented frame.
     left = pd.DataFrame(columns, index=fresh.index)
-    prior = (
-        key_strings(existing, key_cols, date_cols=dates)
-        .join(existing[prior_cols].rename(columns=renamed))
-        .drop_duplicates(subset=key_cols, keep="last")
+    stored = dict(key_strings(existing, key_cols, date_cols=dates).items())
+    stored.update((renamed[col], existing[col]) for col in prior_cols)
+    prior = pd.DataFrame(stored, index=existing.index).drop_duplicates(
+        subset=key_cols, keep="last"
     )
     merged = left.merge(prior, on=key_cols, how="left", indicator=True)
     selected = merged["_merge"] == "left_only"
@@ -143,6 +143,9 @@ def read_existing(
         for col in value_cols:
             if col in frame.columns:
                 frame[col] = pd.to_numeric(frame[col], errors="coerce")
+        # Parsing column by column leaves one block per column; consolidate so
+        # callers can add columns to a wide frame without pandas warning.
+        frame = frame.copy()
     else:
         frame = existing.copy()
     for col in text_cols:

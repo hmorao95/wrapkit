@@ -108,15 +108,19 @@ def test_read_existing_empty_file(tmp_path: Path) -> None:
     assert list(out.columns) == list(_fresh().columns)
 
 
-def test_select_new_wide_frame_does_not_fragment() -> None:
-    """Hundreds of value columns are compared without a pandas warning."""
+def test_select_new_wide_frame_does_not_fragment(tmp_path: Path) -> None:
+    """Hundreds of value columns, read back from a CSV, compare without a warning."""
     values = [f"m{i}" for i in range(200)]
     stored = pd.DataFrame({"k": ["a", "b"], **{c: [1.0, 2.0] for c in values}})
+    path = tmp_path / "wide.csv"
+    stored.to_csv(path, index=False)
     fresh = stored.copy()
     fresh.loc[1, "m150"] = 9.0
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        new = incremental.select_new(fresh, stored, ["k"], values)
+        existing = incremental.read_existing(path, fresh, values)
+        new = incremental.select_new(fresh, existing, ["k"], values)
+        existing["extra"] = 1  # the returned frame is consolidated too
     assert new["k"].tolist() == ["b"]
 
 

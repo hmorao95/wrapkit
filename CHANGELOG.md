@@ -21,9 +21,10 @@ All notable changes to this project are documented here. The format follows
 
 - `read_existing` treats a zero-byte CSV as no prior extract. Before, pandas
   raised `EmptyDataError` on it.
-- `select_new` and `key_strings` build their work frames in one step. With
-  more than about 100 value columns, adding them one by one made pandas warn
-  about a fragmented frame, an error under a warnings-as-errors test setup.
+- `select_new` and `key_strings` build their work frames in one step, and
+  `read_existing` returns a consolidated frame after parsing a CSV. With more
+  than about 100 value columns, pandas warned about a fragmented frame, an
+  error under a warnings-as-errors test setup.
 
 ## [0.2.1] - 2026-11-02
 
