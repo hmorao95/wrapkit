@@ -37,7 +37,42 @@ def test_key_strings_normalises_dates_and_missing() -> None:
     )
     out = incremental.key_strings(frame, ["date", "k"])
     assert out["date"].tolist() == ["2024-01-01T00:00:00", "2024-01-02T00:00:00"]
-    assert out["k"].tolist() == ["1.0", ""]
+    assert out["k"].tolist() == ["1", ""]
+
+
+def test_key_strings_writes_whole_decimals_as_integers() -> None:
+    """``110.0`` and ``110`` give one key; codes and real decimals are kept."""
+    floats = pd.DataFrame({"k": [110.0, -3.0, 2.5, np.nan]})
+    text = pd.DataFrame({"k": ["110.0", "-3.00", "2.50", "01", "1e3", "A.0"]})
+    assert incremental.key_strings(floats, ["k"])["k"].tolist() == [
+        "110",
+        "-3",
+        "2.5",
+        "",
+    ]
+    assert incremental.key_strings(text, ["k"])["k"].tolist() == [
+        "110",
+        "-3",
+        "2.50",
+        "01",
+        "1e3",
+        "A.0",
+    ]
+
+
+def test_int_and_float_keys_match_across_runs(tmp_path: Path) -> None:
+    """A revision is not added as a new row when the key's dtype flips."""
+    path = tmp_path / "s.csv"
+    # First run: the key column had a gap, so it was float and stored as 110.0.
+    pd.DataFrame({"k": [110.0, np.nan], "v": [1.0, 2.0]}).to_csv(path, index=False)
+    # Next run: no gap, so the key is int; the value for 110 was revised.
+    fresh = pd.DataFrame({"k": [110], "v": [5.0]})
+    existing = incremental.read_existing(path, fresh, ["v"])
+    new = incremental.select_new(fresh, existing, ["k"], ["v"])
+    assert new["v"].tolist() == [5.0]
+    merged = incremental.upsert(existing, new, ["k"])
+    assert len(merged) == 2  # 110 replaced, the blank-key row kept
+    assert sorted(merged["v"].tolist()) == [2.0, 5.0]
 
 
 def test_select_new_without_history_returns_all() -> None:

@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 
 __all__ = ["key_strings", "read_existing", "select_new", "upsert"]
 
+# A whole number spelled as a decimal ("110.0", "-3.00"); group 1 is "110".
+_WHOLE_DECIMAL = r"^([+-]?\d+)\.0+$"
+
 
 def key_strings(
     frame: pd.DataFrame,
@@ -32,7 +35,11 @@ def key_strings(
     Render a frame's key columns as comparable strings.
 
     Date columns are normalised to one ISO format first; missing values become
-    ``""``.
+    ``""``. A whole number spelled as a decimal (``"110.0"``) is written as an
+    integer (``"110"``): pandas spells a number by its column's dtype, and a
+    key column turns float when a fetch has a gap in it, so the same key would
+    otherwise read ``110`` in one run and ``110.0`` in the next (or in the
+    stored CSV). Codes without a decimal point, such as ``"01"``, are kept.
 
     Args:
         frame (pd.DataFrame): A fetched or stored frame.
@@ -50,7 +57,10 @@ def key_strings(
             series = pd.to_datetime(series, format="ISO8601").dt.strftime(
                 "%Y-%m-%dT%H:%M:%S"
             )
-        columns[col] = series.astype("string").fillna("").astype(str)
+        text = series.astype("string").fillna("")
+        if col not in dates:
+            text = text.str.replace(_WHOLE_DECIMAL, r"\1", regex=True)
+        columns[col] = text.astype(str)
     # Built in one go: adding many columns one by one fragments the frame.
     return pd.DataFrame(columns, index=frame.index)
 

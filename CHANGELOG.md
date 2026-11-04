@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `key_strings` (and so `select_new` and `upsert`) now writes a whole
+  number spelled as a decimal as an integer: `110.0` and `110` give the same
+  key. pandas spells a number by its column's dtype, and a numeric key column
+  turns float when a fetch has a gap in it, so the same key used to read
+  `110` in one run and `110.0` in the next (or in the stored CSV). A revised
+  row was then added next to the old one instead of replacing it. Codes
+  without a decimal point, such as `"01"`, are unchanged; a text key spelled
+  `"110.0"` now also matches `"110"`.
+
 ## [0.2.4] - 2026-11-04
 
 ### Fixed
