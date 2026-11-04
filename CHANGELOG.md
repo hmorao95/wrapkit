@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `read_existing` no longer turns codes such as `"NA"` (Namibia,
+  Netherlands Antilles), `"None"` or `"null"` into missing values when it
+  reads a stored CSV. Only an empty field counts as missing now. Before,
+  those rows lost their key, so every update re-added them as new and the
+  file gained a duplicate row with a blank key.
+- `select_new` no longer crashes with "Cannot mask with non-boolean array
+  containing NA" when a compared column is a nullable dtype and one side is
+  `<NA>`, for example a unit or flag that appears or disappears. That change
+  now counts as a revision.
+- `DiskCache.put` writes through a temp file and `Path.replace`, so an
+  interrupted write no longer leaves a truncated entry. `DiskCache.get`
+  treats an entry it cannot decode as a miss rather than raising on every
+  call until the TTL runs out.
+
 ## [0.2.3] - 2026-11-04
 
 ### Changed

@@ -89,3 +89,38 @@ def test_disk_cache_without_logger(tmp_path: Path) -> None:
     store = cache.DiskCache(tmp_path, 60.0)
     store.put("e", None, {"a": [1, 2]})
     assert store.get("e", None) == (True, {"a": [1, 2]})
+
+
+def test_disk_cache_unreadable_entry_is_a_miss(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A truncated entry (say, an interrupted write) is a miss, not an error."""
+    lg = logging.getLogger("wrapkit_cache_test")
+    store = cache.DiskCache(tmp_path, 60.0, logger=lg)
+    file = store.path("e", [])
+    assert file is not None
+    file.write_text('{"a": [1, 2', encoding="utf-8")
+    with caplog.at_level(logging.DEBUG, logger="wrapkit_cache_test"):
+        assert store.get("e", []) == (False, None)
+    assert "unreadable" in caplog.text
+    store.put("e", [], {"a": [1, 2]})
+    assert store.get("e", []) == (True, {"a": [1, 2]})
+
+
+def test_disk_cache_put_leaves_no_partial_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails part way leaves the old entry and no temp file."""
+    store = cache.DiskCache(tmp_path, 60.0)
+    store.put("e", [], {"a": 1})
+
+    def _fail(*_a: object, **_k: object) -> None:
+        """Simulate the swap failing (disk full, killed process)."""
+        msg = "disk full"
+        raise OSError(msg)
+
+    monkeypatch.setattr("pathlib.Path.replace", _fail)
+    with pytest.raises(OSError, match="disk full"):
+        store.put("e", [], {"a": 2})
+    assert store.get("e", []) == (True, {"a": 1})
+    assert [p.name for p in tmp_path.iterdir() if p.suffix == ".tmp"] == []

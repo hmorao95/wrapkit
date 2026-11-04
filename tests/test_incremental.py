@@ -134,3 +134,36 @@ def test_upsert_numeric_sort() -> None:
         stored, fresh, ["code", "year"], date_cols=(), numeric_cols=["code"]
     )
     assert [str(c) for c in by_number["code"]] == ["2", "9", "10", "100"]
+
+
+def test_read_existing_keeps_na_like_codes(tmp_path: Path) -> None:
+    """Codes such as "NA" (Namibia) survive a CSV round trip; blanks stay NaN."""
+    fresh = pd.DataFrame(
+        {
+            "date": ["2024-01-01"] * 4,
+            "country": ["NA", "None", "null", "US"],
+            "v": [1.0, 2.0, 3.0, np.nan],
+        }
+    )
+    path = tmp_path / "s.csv"
+    fresh.to_csv(path, index=False)
+    existing = incremental.read_existing(path, fresh, ["v"])
+    assert existing["country"].tolist() == ["NA", "None", "null", "US"]
+    assert existing["v"].isna().tolist() == [False, False, False, True]
+    new = incremental.select_new(fresh, existing, ["date", "country"], ["v"])
+    assert new.empty
+    merged = incremental.upsert(existing, fresh, ["date", "country"])
+    assert len(merged) == 4
+
+
+def test_select_new_compares_nullable_missing_values() -> None:
+    """A value going between <NA> and text counts as a revision, not a crash."""
+    existing = pd.DataFrame(
+        {"date": ["2024-01-01", "2024-01-02"], "v": [1.0, 2.0], "unit": ["TWh", None]}
+    )
+    fresh = existing.copy()
+    fresh["unit"] = pd.array([pd.NA, pd.NA], dtype="string")
+    new = incremental.select_new(fresh, existing, ["date"], ["v", "unit"])
+    assert new["date"].tolist() == ["2024-01-01"]
+    back = incremental.select_new(existing, fresh, ["date"], ["v", "unit"])
+    assert back["date"].tolist() == ["2024-01-01"]

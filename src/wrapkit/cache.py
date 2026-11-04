@@ -17,6 +17,7 @@ from __future__ import annotations
 import enum
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
@@ -178,7 +179,8 @@ class DiskCache:
 
         Returns:
             tuple[bool, Any]: ``(True, payload)`` on a fresh hit, otherwise
-            ``(False, None)``. A JSON ``null`` payload is a valid hit.
+            ``(False, None)``. A JSON ``null`` payload is a valid hit; a file
+            that cannot be decoded (say, a truncated write) is a miss.
         """
         file = self.path(endpoint, params)
         if file is None or not file.exists():
@@ -187,8 +189,13 @@ class DiskCache:
         if age >= self.ttl_seconds:
             self._debug("Cache expired: %s (age %.0fs)", endpoint, age)
             return False, None
+        try:
+            payload = json.loads(file.read_text("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            self._debug("Cache entry unreadable, ignored: %s", endpoint)
+            return False, None
         self._debug("Cache hit: %s (age %.0fs)", endpoint, age)
-        return True, json.loads(file.read_text("utf-8"))
+        return True, payload
 
     def put(
         self, endpoint: str, params: Sequence[tuple[str, Any]] | None, payload: object
@@ -203,7 +210,14 @@ class DiskCache:
         """
         file = self.path(endpoint, params)
         if file is not None:
-            file.write_text(json.dumps(payload), encoding="utf-8")
+            # Write a sibling temp file, then swap it in, so a reader never
+            # sees a half-written entry and an interrupted write leaves none.
+            temp = file.with_name(f"{file.name}.{os.getpid()}.tmp")
+            try:
+                temp.write_text(json.dumps(payload), encoding="utf-8")
+                temp.replace(file)
+            finally:
+                temp.unlink(missing_ok=True)
 
     def _debug(self, msg: str, *args: object) -> None:
         """
