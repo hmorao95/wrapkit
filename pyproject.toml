@@ -1,6 +1,6 @@
 [project]
 name = "wrapkit"
-version = "0.2.4"
+version = "0.2.5"
 description = "Shared infrastructure for data-API wrappers: logging with secret redaction, a disk cache, retries, tidy frames, incremental CSV updates and python-fire helpers."
 readme = "README.md"
 requires-python = ">=3.10"
