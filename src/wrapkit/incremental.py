@@ -157,7 +157,7 @@ def read_existing(
         frame = pd.read_csv(path, dtype=str, keep_default_na=False, na_values=[""])
         for col in value_cols:
             if col in frame.columns:
-                frame[col] = pd.to_numeric(frame[col], errors="coerce")
+                frame[col] = _to_number(frame[col])
         # Parsing column by column leaves one block per column; consolidate so
         # callers can add columns to a wide frame without pandas warning.
         frame = frame.copy()
@@ -167,6 +167,29 @@ def read_existing(
         if col in frame.columns:
             frame[col] = frame[col].astype(str)
     return frame
+
+
+def _to_number(text: pd.Series) -> pd.Series:
+    """
+    Parse a column read as text into numbers, exactly.
+
+    ``pd.to_numeric`` before pandas 3.1 can land one unit in the last place off
+    a full-precision float that ``to_csv`` wrote (about one value in eight), so
+    an unchanged stored value would compare as a revision on every run. The
+    values it parses as floats are parsed again with ``float``, which is exact;
+    text that is not a number still becomes ``NaN``.
+
+    Args:
+        text (pd.Series): A column read from CSV as text.
+
+    Returns:
+        pd.Series: The parsed numbers.
+    """
+    numbers = pd.to_numeric(text, errors="coerce")
+    if pd.api.types.is_float_dtype(numbers):
+        parsed = numbers.notna()
+        numbers[parsed] = text[parsed].astype("float64")
+    return numbers
 
 
 def upsert(

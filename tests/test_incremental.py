@@ -171,6 +171,31 @@ def test_upsert_numeric_sort() -> None:
     assert [str(c) for c in by_number["code"]] == ["2", "9", "10", "100"]
 
 
+def test_read_existing_reads_floats_back_exactly(tmp_path: Path) -> None:
+    """Full-precision floats survive the CSV round trip bit for bit."""
+    values = np.random.default_rng(0).random(2000) * 1000
+    fresh = pd.DataFrame({"k": [str(i) for i in range(len(values))], "v": values})
+    fresh.loc[0, "v"] = np.nan
+    path = tmp_path / "s.csv"
+    fresh.to_csv(path, index=False)
+    existing = incremental.read_existing(path, fresh, ["v"])
+    assert existing["v"].dtype == "float64"
+    assert existing["v"].isna().tolist() == fresh["v"].isna().tolist()
+    assert (existing["v"].iloc[1:].to_numpy() == values[1:]).all()
+    assert incremental.select_new(fresh, existing, ["k"], ["v"]).empty
+
+
+def test_read_existing_number_parse_keeps_ints_and_junk(tmp_path: Path) -> None:
+    """Whole numbers stay integers and text that is not a number is missing."""
+    path = tmp_path / "s.csv"
+    path.write_text("k,n,v\na,1,x\nb,2,1.5\n", encoding="utf-8")
+    existing = incremental.read_existing(path, pd.DataFrame(), ["n", "v"])
+    assert existing["n"].tolist() == [1, 2]
+    assert pd.api.types.is_integer_dtype(existing["n"])
+    assert existing["v"].isna().tolist() == [True, False]
+    assert existing["v"].iloc[1] == 1.5
+
+
 def test_read_existing_keeps_na_like_codes(tmp_path: Path) -> None:
     """Codes such as "NA" (Namibia) survive a CSV round trip; blanks stay NaN."""
     fresh = pd.DataFrame(

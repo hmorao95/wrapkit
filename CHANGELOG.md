@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `read_existing` now reads stored numbers back exactly. Before pandas 3.1,
+  `pd.to_numeric` parsed about one full-precision float in eight one unit in
+  the last place off the value `to_csv` wrote, so `select_new` counted those
+  unchanged rows as revisions and `update_csv` rewrote them on every run
+  (pandas 2.3, which Python 3.10 gets, and 3.0). Floats are now parsed with
+  `float`; integers and text that is not a number are handled as before.
+
 ## [0.2.5] - 2026-11-04
 
 ### Fixed
