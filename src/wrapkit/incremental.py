@@ -103,7 +103,10 @@ def select_new(
     if include_revisions:
         for col in prior_cols:
             now, prev = merged[col], merged[f"_prev_{col}"]
-            same = (now == prev) | (now.isna() & prev.isna())
+            # ``<NA>`` against a value compares as ``<NA>`` in nullable dtypes;
+            # count it as a difference so the mask stays boolean.
+            equal = (now == prev).astype("boolean").fillna(value=False).astype(bool)
+            same = equal | (now.isna() & prev.isna())
             selected |= (merged["_merge"] == "both") & ~same
     return fresh[selected.to_numpy()].reset_index(drop=True)
 
@@ -120,8 +123,10 @@ def read_existing(
 
     A frame is copied, so the caller's is not changed. A CSV is read as text, so
     key columns keep their exact spelling (``"01"`` stays ``"01"``); the value
-    columns are then parsed back into numbers. A missing or empty (zero-byte)
-    file counts as no prior extract.
+    columns are then parsed back into numbers. Only an empty field counts as
+    missing: codes such as ``"NA"`` (Namibia) or ``"None"`` are kept as text,
+    not turned into NaN as pandas does by default. A missing or empty
+    (zero-byte) file counts as no prior extract.
 
     Args:
         existing (pd.DataFrame | str | Path): The prior extract or a CSV path.
@@ -139,7 +144,7 @@ def read_existing(
         path = Path(existing)
         if not path.exists() or path.stat().st_size == 0:
             return like.iloc[0:0]
-        frame = pd.read_csv(path, dtype=str)
+        frame = pd.read_csv(path, dtype=str, keep_default_na=False, na_values=[""])
         for col in value_cols:
             if col in frame.columns:
                 frame[col] = pd.to_numeric(frame[col], errors="coerce")
