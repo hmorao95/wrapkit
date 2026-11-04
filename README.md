@@ -15,13 +15,13 @@ wrapkit is installed from GitHub, pinned to a release tag (no credentials
 needed):
 
 ```bash
-pip install "wrapkit @ git+https://github.com/hmorao95/wrapkit@v0.2.1"
+pip install "wrapkit @ git+https://github.com/hmorao95/wrapkit@v0.2.3"
 ```
 
 In a wrapper's `pyproject.toml`:
 
 ```toml
-dependencies = ["wrapkit @ git+https://github.com/hmorao95/wrapkit@v0.2.1"]
+dependencies = ["wrapkit @ git+https://github.com/hmorao95/wrapkit@v0.2.3"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

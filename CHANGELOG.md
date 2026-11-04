@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-04
+
+### Changed
+
+- `.gitignore` now also ignores LaTeX build files (`*.aux`, `*.log`,
+  `*.synctex.gz`, `*.fdb_latexmk` and the like) and Jupyter checkpoints
+  (`.ipynb_checkpoints/`). No change to the package.
+
 ## [0.2.2] - 2026-11-03
 
 ### Added
@@ -72,7 +80,8 @@ All notable changes to this project are documented here. The format follows
 - `wrapkit.cli`: `resolve_out`, `as_text`, `bind_bool_flags`,
   `literal_keeping_codes`, `set_parse_fns`, `run`.
 
-[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/hmorao95/wrapkit/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/hmorao95/wrapkit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/hmorao95/wrapkit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/hmorao95/wrapkit/compare/v0.1.0...v0.2.0
