@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-04
+
 ### Fixed
 
 - `read_existing` no longer turns codes such as `"NA"` (Namibia,
@@ -96,7 +98,8 @@ All notable changes to this project are documented here. The format follows
 - `wrapkit.cli`: `resolve_out`, `as_text`, `bind_bool_flags`,
   `literal_keeping_codes`, `set_parse_fns`, `run`.
 
-[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/hmorao95/wrapkit/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/hmorao95/wrapkit/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/hmorao95/wrapkit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/hmorao95/wrapkit/compare/v0.2.0...v0.2.1
