@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `period_start` and `period_end` now read month labels in any common
+  spelling (`2024-6`, `2024/06`, `06/2024`, `2024.06`, `Jun 2024`) as the
+  whole month. They used to fall through to `pandas.Timestamp`, which reads
+  them as the month's first day, so an `end="2024-6"` bound stopped on
+  June 1 instead of covering June. `2024-06`, `202406`, years, quarters and
+  full dates behave as before.
+
 ## [0.2.6] - 2026-11-04
 
 ### Fixed

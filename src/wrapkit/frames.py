@@ -144,7 +144,8 @@ def as_polars(frame: pd.DataFrame, dist: str) -> pl.DataFrame:
 
 
 # A period label at year, quarter or month precision: 2024, 2024-Q2 (or
-# 2024Q2), 2024-06 (or 202406).
+# 2024Q2), 2024-06 (or 202406). Other month spellings (2024-6, 2024/06,
+# 06/2024, Jun 2024) are recognised by pandas' period parser (_month).
 _YEAR = re.compile(r"^\s*(\d{4})\s*$")
 _QUARTER = re.compile(r"^\s*(\d{4})-?Q([1-4])\s*$", re.IGNORECASE)
 _MONTH = re.compile(r"^\s*(\d{4})-?(0[1-9]|1[0-2])\s*$")
@@ -170,7 +171,34 @@ def _span(label: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
     if m := _MONTH.match(label):
         start = pd.Timestamp(year=int(m[1]), month=int(m[2]), day=1)
         return start, start + pd.DateOffset(months=1)
+    if (first := _month(label)) is not None:
+        return first, first + pd.DateOffset(months=1)
     return None
+
+
+def _month(label: str) -> pd.Timestamp | None:
+    """
+    Return the first day of a month label in another spelling.
+
+    ``2024-6``, ``2024/06``, ``06/2024``, ``2024.06`` and ``Jun 2024`` name a
+    month; :func:`pandas.Timestamp` would read each as the month's first day,
+    so an end bound would stop there. :class:`pandas.Period` infers the
+    precision instead (a full date stays a day).
+
+    Args:
+        label (str): The period label.
+
+    Returns:
+        pd.Timestamp | None: The month's first day, or ``None`` when the label
+        is not a month.
+    """
+    try:
+        period = pd.Period(label.strip())
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(period, pd.Period) or period.freqstr != "M":
+        return None  # NaT (an empty label) or another precision
+    return pd.Timestamp(year=period.year, month=period.month, day=1)
 
 
 def period_start(label: str) -> pd.Timestamp:
@@ -178,9 +206,9 @@ def period_start(label: str) -> pd.Timestamp:
     Return the first instant of a period label.
 
     Args:
-        label (str): ``2024``, ``2024-Q2``, ``2024-06`` or anything
-            :func:`pandas.Timestamp` parses (``2024-06-15``,
-            ``2024-06-15T12:00``).
+        label (str): ``2024``, ``2024-Q2``, a month (``2024-06``, ``2024-6``,
+            ``06/2024``, ``Jun 2024``) or anything :func:`pandas.Timestamp`
+            parses (``2024-06-15``, ``2024-06-15T12:00``).
 
     Returns:
         pd.Timestamp: The start of the period. An unparseable label raises
