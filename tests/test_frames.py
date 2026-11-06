@@ -116,6 +116,13 @@ def test_as_polars_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         ("2024q4", "2024-10-01", "2025-01-01"),
         ("2024-06", "2024-06-01", "2024-07-01"),
         ("202412", "2024-12-01", "2025-01-01"),
+        # Other month spellings cover the whole month, not its first day.
+        ("2024-6", "2024-06-01", "2024-07-01"),
+        ("2024/06", "2024-06-01", "2024-07-01"),
+        ("06/2024", "2024-06-01", "2024-07-01"),
+        ("2024.12", "2024-12-01", "2025-01-01"),
+        ("Jun 2024", "2024-06-01", "2024-07-01"),
+        (" june 2024 ", "2024-06-01", "2024-07-01"),
         ("2024-06-15", "2024-06-15", "2024-06-15"),
         (" 2024-06-15T12:30 ", "2024-06-15 12:30", "2024-06-15 12:30"),
     ],
@@ -126,7 +133,7 @@ def test_period_bounds(label: str, start: str, end: str) -> None:
     assert frames.period_end(label) == pd.Timestamp(end)
 
 
-@pytest.mark.parametrize("label", ["soon", "", "2024-13"])
+@pytest.mark.parametrize("label", ["soon", "", "  ", "2024-13", "13/2024"])
 def test_period_bad_label(label: str) -> None:
     """Unparseable labels raise ValueError."""
     with pytest.raises(ValueError, match="Cannot parse period"):
