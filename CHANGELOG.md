@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-11-07
+
 ### Changed
 
 - `snake` drops accents and spells out German letters instead of turning
@@ -180,7 +182,8 @@ All notable changes to this project are documented here. The format follows
 - `wrapkit.cli`: `resolve_out`, `as_text`, `bind_bool_flags`,
   `literal_keeping_codes`, `set_parse_fns`, `run`.
 
-[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.7...HEAD
+[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/hmorao95/wrapkit/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/hmorao95/wrapkit/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/hmorao95/wrapkit/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/hmorao95/wrapkit/compare/v0.2.4...v0.2.5
