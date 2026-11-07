@@ -11,6 +11,7 @@ the shared column order, dtypes and sort.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -47,6 +48,9 @@ def snake(name: str, *, acronyms: bool = False) -> str:
     own: ``GDPValue`` becomes ``gdp_value`` and ``isCAMRelevant``
     ``is_cam_relevant``.
 
+    Accents are dropped and German letters spelled out (``Região`` becomes
+    ``regiao``, ``Größe`` ``groesse``); other letters, such as ``ø``, are kept.
+
     Args:
         name (str): The raw column name.
         acronyms (bool): Split a run of capitals from the word that follows.
@@ -54,10 +58,34 @@ def snake(name: str, *, acronyms: bool = False) -> str:
     Returns:
         str: The lower-case snake_case name.
     """
+    name = _plain_letters(name)
     if acronyms:
         name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
     spaced = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", name)
-    return re.sub(r"[^0-9A-Za-z]+", "_", spaced).strip("_").lower()
+    return re.sub(r"[\W_]+", "_", spaced).strip("_").lower()
+
+
+# German letters spelled out, as in "Groesse": an umlaut is its vowel plus "e".
+# Other accents are just dropped.
+_SPELLED_OUT = {u: unicodedata.normalize("NFKD", u)[0] + "e" for u in "äöüÄÖÜ"}
+_SPELLED_OUT["ß"] = "ss"
+
+
+def _plain_letters(name: str) -> str:
+    """
+    Drop accents and spell out German letters, keeping every other character.
+
+    Args:
+        name (str): A column name.
+
+    Returns:
+        str: ``name`` without combining marks, each umlaut spelled as its
+        vowel plus ``e`` and ``ß`` as ``ss``.
+    """
+    for letter, spelled in _SPELLED_OUT.items():
+        name = name.replace(letter, spelled)
+    decomposed = unicodedata.normalize("NFKD", name)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
 
 
 def empty_tidy(dims: Sequence[str]) -> pd.DataFrame:
@@ -144,11 +172,18 @@ def as_polars(frame: pd.DataFrame, dist: str) -> pl.DataFrame:
 
 
 # A period label at year, quarter or month precision: 2024, 2024-Q2 (or
-# 2024Q2), 2024-06 (or 202406). Other month spellings (2024-6, 2024/06,
-# 06/2024, Jun 2024) are recognised by pandas' period parser (_month).
+# 2024Q2), 2024-06 (or 202406) and the SDMX month 2024-M06 (or 2024M6). Other
+# month spellings (2024-6, 2024/06, 06/2024, Jun 2024) are recognised by
+# pandas' period parser (_month). pandas.Timestamp reads 2024-M06 as
+# 2024-01-01 00:00:06, so that spelling must be caught here.
 _YEAR = re.compile(r"^\s*(\d{4})\s*$")
 _QUARTER = re.compile(r"^\s*(\d{4})-?Q([1-4])\s*$", re.IGNORECASE)
-_MONTH = re.compile(r"^\s*(\d{4})-?(0[1-9]|1[0-2])\s*$")
+_MONTH = re.compile(
+    r"^\s*(\d{4})(?:-?(0[1-9]|1[0-2])|-?M(0?[1-9]|1[0-2]))\s*$", re.IGNORECASE
+)
+# A year joined to a letter code (2024-M13, 2024-S1, 2024-W23) that none of the
+# above matched: pandas.Timestamp may read the digits as a time of day.
+_CODED = re.compile(r"^\s*\d{4}-?[A-Za-z]\d*\s*$")
 
 
 def _span(label: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
@@ -169,7 +204,7 @@ def _span(label: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
         start = pd.Timestamp(year=int(m[1]), month=3 * int(m[2]) - 2, day=1)
         return start, start + pd.DateOffset(months=3)
     if m := _MONTH.match(label):
-        start = pd.Timestamp(year=int(m[1]), month=int(m[2]), day=1)
+        start = pd.Timestamp(year=int(m[1]), month=int(m[2] or m[3]), day=1)
         return start, start + pd.DateOffset(months=1)
     if (first := _month(label)) is not None:
         return first, first + pd.DateOffset(months=1)
@@ -207,7 +242,7 @@ def period_start(label: str) -> pd.Timestamp:
 
     Args:
         label (str): ``2024``, ``2024-Q2``, a month (``2024-06``, ``2024-6``,
-            ``06/2024``, ``Jun 2024``) or anything :func:`pandas.Timestamp`
+            ``06/2024``, ``Jun 2024``, ``2024-M06``) or anything :func:`pandas.Timestamp`
             parses (``2024-06-15``, ``2024-06-15T12:00``).
 
     Returns:
@@ -252,6 +287,9 @@ def _parse(label: str) -> pd.Timestamp:
     Raises:
         ValueError: If pandas cannot parse it.
     """
+    if _CODED.match(label):
+        msg = f"Cannot parse period {label!r}."
+        raise ValueError(msg)
     try:
         value = pd.Timestamp(label.strip())
     except (ValueError, TypeError) as exc:

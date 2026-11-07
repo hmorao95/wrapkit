@@ -140,7 +140,8 @@ class DiskCache:
         Args:
             directory (Path | None): Cache directory, or ``None`` for a cache
                 that never hits and never stores.
-            ttl_seconds (float): How long an entry stays fresh.
+            ttl_seconds (float): How long an entry stays fresh; ``0`` (or
+                less) means never.
             hidden (Iterable[str]): Secret parameter names left out of the key.
             logger (logging.Logger | None): Receives DEBUG lines for hits and
                 expired entries.
@@ -186,7 +187,9 @@ class DiskCache:
         if file is None or not file.exists():
             return False, None
         age = time.time() - file.stat().st_mtime
-        if age >= self.ttl_seconds:
+        # A TTL of zero (or less) means always refetch, even when the file's
+        # time is a hair ahead of the clock and the age comes out negative.
+        if self.ttl_seconds <= 0 or age >= self.ttl_seconds:
             self._debug("Cache expired: %s (age %.0fs)", endpoint, age)
             return False, None
         try:

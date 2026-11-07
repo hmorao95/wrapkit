@@ -124,3 +124,16 @@ def test_disk_cache_put_leaves_no_partial_file(
         store.put("e", [], {"a": 2})
     assert store.get("e", []) == (True, {"a": 1})
     assert [p.name for p in tmp_path.iterdir() if p.suffix == ".tmp"] == []
+
+
+def test_disk_cache_zero_ttl_never_hits(tmp_path: Path) -> None:
+    """A zero TTL refetches even when the file's time is ahead of the clock."""
+    store = cache.DiskCache(tmp_path, 0)
+    store.put("e", [("a", "1")], {"x": 1})
+    file = store.path("e", [("a", "1")])
+    assert file is not None
+    ahead = time.time() + 5
+    os.utime(file, (ahead, ahead))
+    assert store.get("e", [("a", "1")]) == (False, None)
+    fresh = cache.DiskCache(tmp_path, 60)
+    assert fresh.get("e", [("a", "1")]) == (True, {"x": 1})

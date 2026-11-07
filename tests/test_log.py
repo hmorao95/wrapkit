@@ -159,9 +159,77 @@ def test_file_log_is_plain_debug(logger: logging.Logger, tmp_path: Path) -> None
 
 
 def test_plain_formatter_restores_cache() -> None:
-    """The cached traceback text is put back after formatting."""
-    record = logging.LogRecord("n", logging.ERROR, __file__, 1, "m", (), None)
-    record.exc_text = "cached"
+    """A colored cache is re-rendered plain, then put back after formatting."""
+    try:
+        msg = "boom"
+        raise RuntimeError(msg)  # ruff: ignore[raise-within-try]
+    except RuntimeError:
+        import sys
+
+        record = logging.LogRecord(
+            "n", logging.ERROR, __file__, 1, "m", (), sys.exc_info()
+        )
+    record.exc_text = "\x1b[31mcolored\x1b[0m"
     out = log.PlainFormatter("%(message)s").format(record)
-    assert out == "m"
-    assert record.exc_text == "cached"
+    assert "RuntimeError: boom" in out
+    assert "\x1b[" not in out
+    assert record.exc_text == "\x1b[31mcolored\x1b[0m"
+
+
+def test_plain_formatter_uses_redacted_text() -> None:
+    """A record cleaned by RedactFilter has only text; it is written as is."""
+    record = logging.LogRecord("n", logging.ERROR, __file__, 1, "m", (), None)
+    record.exc_text = "Traceback: api_key=***"
+    out = log.PlainFormatter("%(message)s").format(record)
+    assert out == "m\nTraceback: api_key=***"
+
+
+def test_filter_redacts_tracebacks_in_the_log_file(
+    logger: logging.Logger, tmp_path: Path
+) -> None:
+    """A key quoted in an exception message is masked in the logged traceback."""
+    path = tmp_path / "run.log"
+    log.configure_logging(logger, "ERROR", str(path))
+    flt = log.RedactFilter(["api_key"]).install(logger.name)
+    flt.register("supersecretkey123")
+    try:
+        msg = "Max retries exceeded with url: /v2?api_key=supersecretkey123"
+        raise ConnectionError(msg)  # ruff: ignore[raise-within-try]
+    except ConnectionError:
+        logger.debug("Command failed", exc_info=True)
+        logger.debug("no secret here", exc_info=(None, None, None))
+    logger.warning("where supersecretkey123", stack_info=True)
+    for handler in logger.handlers:
+        handler.flush()
+    text = path.read_text("utf-8")
+    assert "supersecretkey123" not in text
+    assert "ConnectionError: Max retries exceeded with url: /v2?api_key=***" in text
+    assert "Traceback (most recent call last)" in text
+    for name in log.HTTP_LOGGERS:
+        logging.getLogger(name).removeFilter(flt)
+
+
+def test_filter_keeps_clean_tracebacks_structured() -> None:
+    """A traceback without a secret keeps its exc_info for other handlers."""
+    flt = log.RedactFilter(["api_key"])
+    try:
+        msg = "boom"
+        raise RuntimeError(msg)  # ruff: ignore[raise-within-try]
+    except RuntimeError:
+        import sys
+
+        record = logging.LogRecord(
+            "n", logging.ERROR, __file__, 1, "m", (), sys.exc_info()
+        )
+    assert flt.filter(record)
+    assert record.exc_info is not None
+    assert record.exc_text is None
+
+
+def test_filter_redacts_a_cached_traceback() -> None:
+    """Traceback text another handler already rendered is cleaned too."""
+    flt = log.RedactFilter(["token"])
+    record = logging.LogRecord("n", logging.ERROR, __file__, 1, "m", (), None)
+    record.exc_text = "Traceback ... ValueError: /x?token=abc"
+    assert flt.filter(record)
+    assert record.exc_text == "Traceback ... ValueError: /x?token=***"
