@@ -2006,7 +2006,7 @@ wheels = [
 
 [[package]]
 name = "wrapkit"
-version = "0.2.7"
+version = "0.2.8"
 source = { editable = "." }
 default-groups = ["dev", "typing"]
 dependencies = [
