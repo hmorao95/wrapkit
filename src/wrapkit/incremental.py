@@ -34,8 +34,9 @@ def key_strings(
     """
     Render a frame's key columns as comparable strings.
 
-    Date columns are normalised to one ISO format first; missing values become
-    ``""``. A whole number spelled as a decimal (``"110.0"``) is written as an
+    Date columns are normalised to one ISO format first, in UTC when they carry
+    a time zone (so the two 02:00 hours of a DST change stay apart) and with
+    any fraction of a second kept; missing values become ``""``. A whole number spelled as a decimal (``"110.0"``) is written as an
     integer (``"110"``): pandas spells a number by its column's dtype, and a
     key column turns float when a fetch has a gap in it, so the same key would
     otherwise read ``110`` in one run and ``110.0`` in the next (or in the
@@ -54,15 +55,37 @@ def key_strings(
     for col in key_cols:
         series = frame[col]
         if col in dates:
-            series = pd.to_datetime(series, format="ISO8601").dt.strftime(
-                "%Y-%m-%dT%H:%M:%S"
-            )
+            series = _date_text(series)
         text = series.astype("string").fillna("")
         if col not in dates:
             text = text.str.replace(_WHOLE_DECIMAL, r"\1", regex=True)
         columns[col] = text.astype(str)
     # Built in one go: adding many columns one by one fragments the frame.
     return pd.DataFrame(columns, index=frame.index)
+
+
+def _date_text(series: pd.Series) -> pd.Series:
+    """
+    Spell dates as ``YYYY-MM-DDTHH:MM:SS``, plus a fraction when there is one.
+
+    Times with a zone (or an offset) are written in UTC: two stamps that share
+    a local wall-clock time, such as the repeated hour when DST ends, are
+    different instants. Naive times are written as they are.
+
+    Args:
+        series (pd.Series): Dates, as timestamps or ISO text.
+
+    Returns:
+        pd.Series: The text, missing where the date is.
+    """
+    stamps = pd.to_datetime(series, format="ISO8601", utc=True)
+    text = stamps.dt.strftime("%Y-%m-%dT%H:%M:%S")
+    nanos = stamps.dt.microsecond * 1000 + stamps.dt.nanosecond
+    fraction = (nanos.fillna(0) != 0).to_numpy()
+    if fraction.any():
+        digits = [f".{int(n):09d}".rstrip("0") for n in nanos[fraction]]
+        text = text.where(~fraction, text + pd.Series(digits, text.index[fraction]))
+    return text
 
 
 def select_new(
@@ -145,7 +168,7 @@ def read_existing(
         value_cols (Sequence[str]): Numeric columns to parse after reading a
             CSV.
         text_cols (Iterable[str]): Columns forced to ``str`` either way (such as
-            a raw ``period`` label).
+            a raw ``period`` label); missing values stay missing.
 
     Returns:
         pd.DataFrame: A comparable copy of the prior extract.
@@ -165,7 +188,10 @@ def read_existing(
         frame = existing.copy()
     for col in text_cols:
         if col in frame.columns:
-            frame[col] = frame[col].astype(str)
+            # A missing value stays missing: astype(str) alone spells it "nan"
+            # on pandas < 3, a key that never matches the fresh row again.
+            values = frame[col]
+            frame[col] = values.astype(str).mask(values.isna())
     return frame
 
 
@@ -205,7 +231,8 @@ def upsert(
     Merge ``fresh`` into ``existing``, the fresh row winning on a key clash.
 
     Stored history that ``fresh`` no longer covers is kept. Date columns are
-    unified to timestamps (stored ones are text after a CSV read), and rows
+    unified to timestamps (stored ones are text after a CSV read; a column with
+    a time zone in ``fresh`` gets that zone), and rows
     are sorted by ``sort_cols`` compared as text, except the ``numeric_cols``
     among them, which are compared as numbers (so ``9`` sorts before ``10``).
 
@@ -228,7 +255,14 @@ def upsert(
     combined = combined[~keys.duplicated(keep="last").to_numpy()]
     for col in dates:
         if col in combined.columns:
-            combined[col] = pd.to_datetime(combined[col], format="ISO8601")
+            zone = getattr(fresh[col].dtype, "tz", None) if col in fresh else None
+            if zone is None:
+                combined[col] = pd.to_datetime(combined[col], format="ISO8601")
+            else:
+                # Stored text has mixed offsets across a DST change: read it
+                # as UTC, then put it back into the fresh column's zone.
+                stamps = pd.to_datetime(combined[col], format="ISO8601", utc=True)
+                combined[col] = stamps.dt.tz_convert(zone)
     order_cols = list(key_cols if sort_cols is None else sort_cols)
     sort_keys = key_strings(combined, order_cols, date_cols=dates)
     for col in set(numeric_cols).intersection(order_cols):

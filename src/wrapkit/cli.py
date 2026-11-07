@@ -43,7 +43,7 @@ def resolve_out(path: str, outputs: str | Path = "outputs") -> str:
 
     A path with no directory part (``data.csv``) is written under ``outputs``
     (created if needed); a path that already has a directory, relative or
-    absolute, is returned unchanged.
+    absolute, is returned unchanged, ``./data.csv`` included.
 
     Args:
         path (str): The user-supplied destination.
@@ -53,7 +53,8 @@ def resolve_out(path: str, outputs: str | Path = "outputs") -> str:
         str: The path to write to.
     """
     candidate = Path(path)
-    if candidate.parent == Path():
+    # Path("./data.csv").parent is Path() too, so look at the text as typed.
+    if candidate.parent == Path() and not re.search(r"[\\/]", path):
         folder = Path(outputs)
         folder.mkdir(parents=True, exist_ok=True)
         return str(folder / candidate.name)
@@ -107,9 +108,12 @@ def bind_bool_flags(argv: list[str], flags: Iterable[str]) -> list[str]:
 
 
 #: A quoted string literal (group 1, left alone) or a bare word that starts with
-#: a zero followed by a digit (group 2), such as the code ``01``.
+#: a zero followed by a digit (group 2), such as the code ``01``. A word joined
+#: to a ``-``, ``/`` or ``:`` is part of a date or a time (``2024-01-15``,
+#: ``06/2024``, ``08:30``) and is left alone.
 _LEADING_ZERO_WORD = re.compile(
-    r"""("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(?<![\w.])(0\d[\w.]*)"""
+    r"""("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')"""
+    r"""|(?<![\w./-])(0\d[\w.]*)(?![\w./:-])"""
 )
 
 

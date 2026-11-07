@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import ssl
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -40,7 +41,8 @@ __all__ = [
 ]
 
 #: ``requests`` transport failures worth another try. Anything else, such as a
-#: malformed URL, fails at once.
+#: malformed URL, fails at once, and so does a failed certificate check (an
+#: ``SSLError`` is a ``ConnectionError``; see :func:`_cannot_heal`).
 RETRY_ERRORS: tuple[type[Exception], ...] = (
     requests.ConnectionError,
     requests.Timeout,
@@ -53,6 +55,35 @@ ASYNC_RETRY_ERRORS: tuple[type[Exception], ...] = (
     httpx.NetworkError,
     httpx.RemoteProtocolError,
 )
+
+
+def _cannot_heal(exc: BaseException) -> bool:
+    """
+    Tell whether a transport error is a certificate failure a retry won't fix.
+
+    ``requests`` and ``httpx`` wrap :class:`ssl.SSLCertVerificationError` a few
+    layers deep (as an argument, a ``reason`` or the cause). Other SSL errors,
+    such as a connection dropped mid-handshake, can be transient and are still
+    retried.
+
+    Args:
+        exc (BaseException): The error a request raised.
+
+    Returns:
+        bool: ``True`` when a certificate check failed somewhere in the chain.
+    """
+    seen: set[int] = set()
+    pending: list[object] = [exc]
+    while pending:
+        err = pending.pop()
+        if not isinstance(err, BaseException) or id(err) in seen:
+            continue
+        seen.add(id(err))
+        if isinstance(err, ssl.SSLCertVerificationError):
+            return True
+        pending.extend((err.__cause__, err.__context__, getattr(err, "reason", None)))
+        pending.extend(err.args)
+    return False
 
 
 def _jitter() -> float:
@@ -178,7 +209,12 @@ class Throttle:
 
 
 class AsyncThrottle(Throttle):
-    """The async twin of :class:`Throttle`; its waits do not block the loop."""
+    """
+    The async twin of :class:`Throttle`; its waits do not block the loop.
+
+    One throttle can serve several event loops in turn (one ``asyncio.run`` per
+    call, for example): its lock is made for the loop that is running.
+    """
 
     def __init__(
         self,
@@ -194,12 +230,17 @@ class AsyncThrottle(Throttle):
             logger (logging.Logger | None): Receives a DEBUG line per sleep.
         """
         super().__init__(requests_per_second, logger)
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def await_turn(self) -> None:
         """Sleep just enough to respect the rate; concurrent callers queue up."""
         if not self.interval:
             return
+        loop = asyncio.get_running_loop()
+        if self._lock is None or self._loop is not loop:
+            # A lock that once had a waiter belongs to that loop for good.
+            self._lock, self._loop = asyncio.Lock(), loop
         async with self._lock:
             wait = self._shortfall()
             if wait > 0:
@@ -283,7 +324,11 @@ def get_with_retries(
         try:
             resp = session.get(url, **kwargs)
         except requests.RequestException as exc:
-            if attempt >= attempts or not isinstance(exc, RETRY_ERRORS):
+            if (
+                attempt >= attempts
+                or not isinstance(exc, RETRY_ERRORS)
+                or _cannot_heal(exc)
+            ):
                 raise
             reason = type(exc).__name__
             wait = policy.wait(attempt)
@@ -349,7 +394,11 @@ async def aget_with_retries(
         try:
             resp = await client.get(url, **kwargs)
         except httpx.HTTPError as exc:
-            if attempt >= attempts or not isinstance(exc, ASYNC_RETRY_ERRORS):
+            if (
+                attempt >= attempts
+                or not isinstance(exc, ASYNC_RETRY_ERRORS)
+                or _cannot_heal(exc)
+            ):
                 raise
             reason = type(exc).__name__
             wait = policy.wait(attempt)
