@@ -138,3 +138,32 @@ def test_period_bad_label(label: str) -> None:
     """Unparseable labels raise ValueError."""
     with pytest.raises(ValueError, match="Cannot parse period"):
         frames.period_end(label)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Região", "regiao"),
+        ("Größe Einheit", "groesse_einheit"),
+        ("Bevölkerung (Männer)", "bevoelkerung_maenner"),
+        ("Søren", "søren"),
+        ("ÜberGröße", "ueber_groesse"),
+    ],
+)
+def test_snake_non_ascii(raw: str, expected: str) -> None:
+    """Accents are dropped and umlauts spelled out, not turned into underscores."""
+    assert frames.snake(raw) == expected
+
+
+@pytest.mark.parametrize("label", ["2024-M06", "2024M06", "2024-M6", "2024m6"])
+def test_sdmx_month_labels(label: str) -> None:
+    """The SDMX month spelling is a whole month, not 2024-01-01 00:00:06."""
+    assert frames.period_start(label) == pd.Timestamp("2024-06-01")
+    assert frames.period_end(label) == pd.Timestamp("2024-07-01")
+
+
+@pytest.mark.parametrize("label", ["2024-M13", "2024-M00"])
+def test_sdmx_month_out_of_range_is_an_error(label: str) -> None:
+    """A month number outside 1-12 is not silently read as a time of day."""
+    with pytest.raises(ValueError, match="Cannot parse period"):
+        frames.period_start(label)

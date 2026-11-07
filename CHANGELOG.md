@@ -6,6 +6,53 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `snake` drops accents and spells out German letters instead of turning
+  them into underscores: `Região` becomes `regiao` (was `regi_o`), `Größe`
+  `groesse` (was `gr_e`). Other letters, such as `ø`, are kept. Column names
+  that had such letters change in the wrappers that use `snake`.
+
+### Fixed
+
+- `RedactFilter` now also masks secrets in a record's traceback and stack,
+  not only its message. `run()` logs every expected error with its
+  traceback, and a `requests` error quotes the full URL, so an API key in
+  the query string reached `--log-file` in clear text. A traceback that held
+  a secret is kept as cleaned text only (the record's `exc_info` is
+  cleared); one without a secret is left as it was.
+- `key_strings` (and so `select_new` and `upsert`) now keeps a date's time
+  zone and fraction of a second in the key. Times with a zone are keyed in
+  UTC, so the two 02:00 hours of the night DST ends no longer share a key,
+  and neither do two stamps in the same second; `upsert` used to keep one
+  row and drop the other. `upsert` now also reads back stored times with
+  mixed UTC offsets (both sides of a DST change) and returns them in the
+  fresh column's zone. Naive whole-second dates key exactly as before.
+- `read_existing(text_cols=...)` keeps a missing value missing. On pandas
+  before 3 it became the text `"nan"`, which never matched the fresh row's
+  key again, so `select_new` returned that row as new on every run.
+- `AsyncThrottle` works under more than one event loop. Its lock used to
+  belong to the first loop it queued callers in, so a client reused under a
+  second `asyncio.run()` raised `RuntimeError` on its next burst of requests.
+- `period_start` and `period_end` read the SDMX month spelling `2024-M06`
+  (also `2024M06`, `2024-M6`, `2024m6`) as June 2024. pandas read it as
+  `2024-01-01 00:00:06`, so an `end` bound silently kept only January 1.
+  Other year-plus-code labels that are not supported (`2024-M13`,
+  `2024-S1`, `2024-W23`) now raise `ValueError` instead of being read as a
+  time of day.
+- `DiskCache` with `ttl_seconds=0` (or less) never serves an entry. A file
+  written a moment ago could carry a time a hair ahead of the clock, and the
+  negative age counted as fresh.
+- `literal_keeping_codes` no longer quotes the zero-led parts of a date or a
+  time: `2024-01-15` used to arrive as `2024-'01'-15`, `06/2024` as
+  `'06'/2024`. Codes such as `01` are still kept as text.
+- `resolve_out` keeps `./data.csv` (or `.\data.csv`) in the current
+  directory, as its docstring says; only a bare name goes to `outputs/`.
+- `get_with_retries` and `aget_with_retries` no longer retry a failed
+  certificate check (an `SSLError` is a `ConnectionError`), which used to
+  cost about 15 s of backoff before the same error. Other SSL errors, such
+  as a dropped handshake, are still retried.
+
 ## [0.2.7] - 2026-11-07
 
 ### Fixed

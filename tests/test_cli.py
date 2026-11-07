@@ -169,3 +169,30 @@ def test_run_expected_error_in_the_callers_words(
     assert capsys.readouterr().err.strip() == "Fehler: bad input"
     assert "Befehl fehlgeschlagen" in caplog.text
     assert "Command failed" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2024-01-15", "2024-01-15"),
+        ("06/2024", "06/2024"),
+        ("2024-06", "2024-06"),
+        ("08:30", "08:30"),
+        ("0612/2024", "0612/2024"),
+        ("{gen: 01, n: 007}", {"gen": "01", "n": "007"}),
+        ("[01, 02]", ["01", "02"]),
+    ],
+)
+def test_literal_keeping_codes_leaves_dates_alone(raw: str, expected: object) -> None:
+    """Zero-led parts of a date or time are not quoted into the text."""
+    assert cli.literal_keeping_codes(raw) == expected
+
+
+def test_resolve_out_keeps_explicit_current_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``./data.csv`` names the current directory and is kept as typed."""
+    monkeypatch.chdir(tmp_path)
+    assert cli.resolve_out("./data.csv") == "./data.csv"
+    assert cli.resolve_out(".\\data.csv") == ".\\data.csv"
+    assert not (tmp_path / "outputs").exists()

@@ -49,6 +49,9 @@ HTTP_LOGGERS = ("urllib3.connectionpool", "urllib3.util.retry", "httpx")
 # still masks short keys inside URLs.
 _MIN_SECRET_LENGTH = 8
 
+# Renders a record's traceback as plain text, so it can be redacted.
+_TRACEBACKS = logging.Formatter()
+
 
 def package_logger(name: str) -> logging.Logger:
     """
@@ -75,9 +78,12 @@ class RedactFilter(logging.Filter):
 
     Each record's message is rewritten with ``***`` in place of the value of
     any of the given query parameters (``api_key=<value>``) and of every
-    registered secret. Records are never dropped, so applications keep their
-    HTTP logs, minus the secret. The cleaned text is frozen into the record, so
-    later formatting cannot put the secret back.
+    registered secret, and so are its traceback and stack (an exception
+    message often quotes the request URL). Records are never dropped, so
+    applications keep their HTTP logs, minus the secret. The cleaned text is
+    frozen into the record, so later formatting cannot put the secret back: a
+    traceback that held a secret is kept as text only (``exc_info`` is
+    cleared).
     """
 
     def __init__(self, params: Iterable[str] = ()) -> None:
@@ -133,7 +139,7 @@ class RedactFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         """
-        Redact secrets from a record's message.
+        Redact secrets from a record's message, traceback and stack.
 
         Args:
             record (logging.LogRecord): The record about to be emitted.
@@ -145,6 +151,18 @@ class RedactFilter(logging.Filter):
         cleaned = self.redact(message)
         if cleaned != message:
             record.msg, record.args = cleaned, ()
+        info = record.exc_info
+        if record.exc_text:
+            trace = record.exc_text
+        elif isinstance(info, tuple) and isinstance(info[1], BaseException):
+            trace = _TRACEBACKS.formatException((type(info[1]), info[1], info[2]))
+        else:
+            trace = ""
+        safe = self.redact(trace)
+        if safe != trace:
+            record.exc_info, record.exc_text = None, safe
+        if record.stack_info:
+            record.stack_info = self.redact(record.stack_info)
         return True
 
     def install(self, *loggers: str) -> RedactFilter:
@@ -189,7 +207,9 @@ class PlainFormatter(logging.Formatter):
     ``logging`` caches a record's formatted traceback in ``exc_text`` for the
     next handler. The colored console formatter (on Python 3.13+) renders it
     with ANSI color codes, which would then leak into the log file; this
-    formatter ignores the cache and formats the traceback itself.
+    formatter ignores the cache and formats the traceback itself. A record
+    whose traceback :class:`RedactFilter` cleaned keeps only that (plain) text,
+    and it is used as it is.
     """
 
     def format(self, record: logging.LogRecord) -> str:
@@ -202,6 +222,8 @@ class PlainFormatter(logging.Formatter):
         Returns:
             str: The formatted line(s).
         """
+        if record.exc_info is None:
+            return super().format(record)
         cached, record.exc_text = record.exc_text, None
         try:
             return super().format(record)

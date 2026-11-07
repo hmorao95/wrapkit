@@ -227,3 +227,61 @@ def test_select_new_compares_nullable_missing_values() -> None:
     assert new["date"].tolist() == ["2024-01-01"]
     back = incremental.select_new(existing, fresh, ["date"], ["v", "unit"])
     assert back["date"].tolist() == ["2024-01-01"]
+
+
+def test_key_strings_keeps_dst_hours_and_fractions_apart() -> None:
+    """Aware times key in UTC; a fraction of a second is part of the key."""
+    stamps = pd.to_datetime(
+        ["2024-10-27T02:00:00+02:00", "2024-10-27T02:00:00+01:00"], utc=True
+    ).tz_convert("Europe/Berlin")
+    aware = incremental.key_strings(pd.DataFrame({"date": stamps}), ["date"])
+    assert aware["date"].tolist() == ["2024-10-27T00:00:00", "2024-10-27T01:00:00"]
+    naive = pd.DataFrame(
+        {"date": pd.to_datetime(["2024-01-01 00:00:00.1", "2024-01-01 00:00:00.9"])}
+    )
+    assert incremental.key_strings(naive, ["date"])["date"].tolist() == [
+        "2024-01-01T00:00:00.1",
+        "2024-01-01T00:00:00.9",
+    ]
+    whole = pd.DataFrame({"date": ["2024-01-01", None]})
+    assert incremental.key_strings(whole, ["date"])["date"].tolist() == [
+        "2024-01-01T00:00:00",
+        "",
+    ]
+
+
+def test_dst_hours_survive_a_csv_round_trip(tmp_path: Path) -> None:
+    """Both 02:00 hours of the DST change are kept and match on the next run."""
+    stamps = pd.to_datetime(
+        [
+            "2024-10-27T01:00:00+02:00",
+            "2024-10-27T02:00:00+02:00",
+            "2024-10-27T02:00:00+01:00",
+            "2024-10-27T03:00:00+01:00",
+        ],
+        utc=True,
+    ).tz_convert("Europe/Berlin")
+    fresh = pd.DataFrame({"date": stamps, "v": [1.0, 2.0, 3.0, 4.0]})
+    path = tmp_path / "x.csv"
+    first = incremental.upsert(fresh.iloc[0:0], fresh, ["date"])
+    assert len(first) == 4
+    first.to_csv(path, index=False)
+    stored = incremental.read_existing(path, fresh, ["v"])
+    assert incremental.select_new(fresh, stored, ["date"], ["v"]).empty
+    merged = incremental.upsert(stored, fresh, ["date"])
+    assert len(merged) == 4
+    assert str(merged["date"].dt.tz) == "Europe/Berlin"
+    assert merged["date"].tolist() == stamps.tolist()
+
+
+def test_read_existing_text_cols_keep_missing(tmp_path: Path) -> None:
+    """A blank stored label stays missing, so it matches the fresh row again."""
+    path = tmp_path / "x.csv"
+    pd.DataFrame({"period": ["2024-01", None], "v": [1.0, 2.0]}).to_csv(
+        path, index=False
+    )
+    fresh = pd.DataFrame({"period": ["2024-01", None], "v": [1.0, 2.0]})
+    stored = incremental.read_existing(path, fresh, ["v"], text_cols=["period"])
+    assert stored["period"].isna().tolist() == [False, True]
+    assert stored["period"].iloc[0] == "2024-01"
+    assert incremental.select_new(fresh, stored, ["period"], ["v"]).empty

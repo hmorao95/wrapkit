@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -305,3 +305,56 @@ def test_user_agent() -> None:
     assert http.user_agent("x-wrapper", "1.0", "https://x.org/") == (
         "Mozilla/5.0 (compatible; x-wrapper/1.0; +https://x.org/)"
     )
+
+
+def _cert_failure_requests() -> requests.exceptions.SSLError:
+    """
+    Build the error chain requests raises for a failed certificate check.
+
+    Returns:
+        requests.exceptions.SSLError: SSLError(MaxRetryError(reason=SSLError(...))).
+    """
+    import ssl
+
+    from urllib3.exceptions import MaxRetryError
+    from urllib3.exceptions import SSLError as Urllib3SSLError
+
+    verify = ssl.SSLCertVerificationError(1, "certificate verify failed")
+    reason = Urllib3SSLError(verify)
+    return requests.exceptions.SSLError(MaxRetryError(cast("Any", None), "/x", reason))
+
+
+def test_get_does_not_retry_certificate_failure(sleeps: list[float]) -> None:
+    """A failed certificate check fails at once; other SSL errors are retried."""
+    session: Any = _Session([_cert_failure_requests()])
+    with pytest.raises(requests.exceptions.SSLError):
+        http.get_with_retries(session, "u")
+    assert sleeps == []
+    flaky: Any = _Session(
+        [requests.exceptions.SSLError("EOF in handshake"), _Resp(200)]
+    )
+    assert http.get_with_retries(flaky, "u", policy=EXACT).status_code == 200
+    assert sleeps == [1.0]
+
+
+def test_aget_does_not_retry_certificate_failure(sleeps: list[float]) -> None:
+    """An httpx error keeps the certificate error as its cause; no retry."""
+    import ssl
+
+    error = httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED]")
+    error.__cause__ = ssl.SSLCertVerificationError(1, "certificate verify failed")
+    session: Any = _AsyncSession([error])
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(http.aget_with_retries(session, "u"))
+    assert sleeps == []
+
+
+def test_async_throttle_serves_several_event_loops() -> None:
+    """A throttle reused under a second asyncio.run() still queues callers."""
+    throttle = http.AsyncThrottle(1000.0)
+
+    async def _burst() -> None:
+        await asyncio.gather(*(throttle.await_turn() for _ in range(3)))
+
+    asyncio.run(_burst())
+    asyncio.run(_burst())
