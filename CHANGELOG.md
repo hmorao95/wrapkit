@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows, a clone whose path has non-ASCII characters (such as
+  `C:\Users\João\...`) left `wrapkit` unimportable when `uv sync` built the
+  environment on Python 3.10 or 3.11, which read the editable install's `.pth`
+  file in the ANSI code page. The development environment now defaults to
+  Python 3.12 (`.python-version`), which reads it as UTF-8. CI still runs the
+  checks on 3.10 to 3.13. The README gives workarounds for 3.10 and 3.11.
+
 ## [0.2.8] - 2026-11-07
 
 ### Changed
