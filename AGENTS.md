@@ -20,6 +20,18 @@ Layout: `src/wrapkit/` (one module per area, see the README), `tests/`
 uv sync
 ```
 
+`.python-version` pins the local environment to Python 3.12, the oldest version
+that reads `.pth` files as UTF-8. On Windows, 3.10 and 3.11 read them in the
+ANSI code page, so the editable install breaks when the clone's path has
+non-ASCII characters and `import wrapkit` fails. The supported floor is still
+3.10: CI runs the checks on 3.10 to 3.13, with `UV_PYTHON` set from the matrix.
+Keep that variable. A `--python` flag on `uv sync` alone does not hold, because
+the next `uv run` reads `.python-version` and rebuilds `.venv` on 3.12.
+
+To test 3.10 or 3.11 locally, use a separate environment with `src` on the
+path, e.g.
+`UV_PROJECT_ENVIRONMENT=$LOCALAPPDATA/Temp/wrapkit310 PYTHONPATH=src uv run -p 3.10 pytest`.
+
 ## Quality gate (must pass before every commit)
 
 CI runs exactly these on Python 3.10 to 3.13:
