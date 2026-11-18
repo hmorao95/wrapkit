@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-11-18
+
 ### Fixed
 
 - `DiskCache.get` treats an entry whose file time is ahead of the clock as
@@ -238,7 +240,8 @@ All notable changes to this project are documented here. The format follows
 - `wrapkit.cli`: `resolve_out`, `as_text`, `bind_bool_flags`,
   `literal_keeping_codes`, `set_parse_fns`, `run`.
 
-[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.9...HEAD
+[Unreleased]: https://github.com/hmorao95/wrapkit/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/hmorao95/wrapkit/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/hmorao95/wrapkit/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/hmorao95/wrapkit/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/hmorao95/wrapkit/compare/v0.2.6...v0.2.7
