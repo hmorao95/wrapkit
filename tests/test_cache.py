@@ -289,8 +289,37 @@ def test_disk_cache_zero_ttl_never_hits(tmp_path: Path) -> None:
     store.put("e", [("a", "1")], {"x": 1})
     file = store.path("e", [("a", "1")])
     assert file is not None
+    assert store.get("e", [("a", "1")]) == (False, None)
     ahead = time.time() + 5
     os.utime(file, (ahead, ahead))
     assert store.get("e", [("a", "1")]) == (False, None)
-    fresh = cache.DiskCache(tmp_path, 60)
-    assert fresh.get("e", [("a", "1")]) == (True, {"x": 1})
+
+
+def test_disk_cache_future_entry_is_expired(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An entry dated ahead of the clock is expired, not fresh until then."""
+    lg = logging.getLogger("wrapkit_cache_future_test")
+    store = cache.DiskCache(tmp_path, 3600, logger=lg)
+    store.put("e", [("a", "1")], {"x": 1})
+    file = store.path("e", [("a", "1")])
+    assert file is not None
+    # A day ahead: the old check served this for a day plus the TTL.
+    ahead = time.time() + 86_400
+    os.utime(file, (ahead, ahead))
+    with caplog.at_level(logging.DEBUG, logger="wrapkit_cache_future_test"):
+        assert store.get("e", [("a", "1")]) == (False, None)
+    assert "Cache expired" in caplog.text
+    # The next put dates the entry now, and it is fresh again.
+    store.put("e", [("a", "1")], {"x": 2})
+    assert store.get("e", [("a", "1")]) == (True, {"x": 2})
+
+
+def test_disk_cache_just_written_entry_is_a_hit(tmp_path: Path) -> None:
+    """An entry read right after it is written is never taken as future-dated."""
+    store = cache.DiskCache(tmp_path, 60)
+    # In float seconds, about 1 write in 130 looked a hair ahead of the clock;
+    # whole nanoseconds never do, so every one of these must hit.
+    for i in range(500):
+        store.put("e", [("i", str(i))], i)
+        assert store.get("e", [("i", str(i))]) == (True, i)
