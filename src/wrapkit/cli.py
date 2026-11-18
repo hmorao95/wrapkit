@@ -11,7 +11,8 @@ but a few of its habits need correcting in every wrapper:
   :func:`literal_keeping_codes`, :func:`set_parse_fns`).
 
 :func:`run` wraps the Fire call itself: expected errors print a short
-``Error: ...`` line and exit 1, with the traceback sent to the log.
+``Error: ...`` line and exit 1, with the traceback sent to the log. The line is
+masked by the logger's :class:`~wrapkit.log.RedactFilter`, as the log is.
 :func:`resolve_out` routes bare output file names into ``outputs/``.
 """
 
@@ -22,6 +23,8 @@ import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from wrapkit.log import RedactFilter
 
 if TYPE_CHECKING:
     import logging
@@ -164,6 +167,32 @@ def set_parse_fns(cli: type, parsers: Mapping[str, Callable[[str], object]]) -> 
             decorators.SetParseFns(**chosen)(command)
 
 
+def _masked(text: str, logger: logging.Logger) -> str:
+    """
+    Mask secrets in text the way ``logger``'s own filters mask its records.
+
+    Text printed outside logging never reaches a filter, so the ``redact`` of
+    every :class:`~wrapkit.log.RedactFilter` attached to ``logger`` itself is
+    applied to it, in the order the filters run on a record. Other filters are
+    skipped: they cannot rewrite plain text.
+
+    Args:
+        text (str): Text shown outside logging, such as an error message.
+        logger (logging.Logger): The logger whose filters apply.
+
+    Returns:
+        str: ``text`` with its secrets replaced by ``***``; unchanged when no
+        filter matches.
+    """
+    # A LoggerAdapter creates its records on the logger it wraps, so that
+    # logger's filters are the ones that mask them.
+    target = getattr(logger, "logger", logger)
+    for flt in getattr(target, "filters", ()):
+        if isinstance(flt, RedactFilter):
+            text = flt.redact(text)
+    return text
+
+
 def run(
     cli: type,
     *,
@@ -181,12 +210,25 @@ def run(
     The two texts a user sees come from the caller, so a wrapper whose CLI
     speaks another language keeps it (``error_prefix="Fehler"``).
 
+    The error's message is printed, not logged, so no logging filter sees it.
+    It gets the masking its DEBUG record gets instead: the ``redact`` of every
+    :class:`~wrapkit.log.RedactFilter` attached to ``logger`` itself. A
+    ``requests`` error quotes the request URL, so with the usual
+    ``RedactFilter(["api_key"]).install(package)`` and that package's logger
+    passed here, the line shows ``api_key=***``, as the log does. A filter on
+    a parent logger or on a handler is not used (logging does not apply a
+    parent logger's filters to the record either), so attach it to
+    ``logger``. A message with no secret is printed unchanged.
+
     Args:
         cli (type): The CLI class (Fire instantiates it with the global flags).
         name (str): The program name shown in help.
-        logger (logging.Logger): Receives the traceback at DEBUG.
+        logger (logging.Logger): Receives the traceback at DEBUG. The
+            :class:`~wrapkit.log.RedactFilter` instances attached to it also
+            mask the printed message.
         expected (tuple[type[BaseException], ...]): Errors shown as
-            ``Error: <message>`` on stderr instead of a traceback.
+            ``Error: <message>`` on stderr instead of a traceback, with
+            secrets masked as in the log.
         argv (list[str] | None): Arguments without the program name;
             ``sys.argv[1:]`` when ``None``.
         bool_flags (Iterable[str]): Boolean flags to pin with
@@ -210,5 +252,7 @@ def run(
         return fire.Fire(cli, name=name, command=bind_bool_flags(args, bool_flags))
     except expected as exc:
         logger.debug(failure_message, exc_info=True)
-        print(f"{error_prefix}: {exc}", file=sys.stderr)  # ruff: ignore[print]
+        # A requests error quotes the URL, key included: mask it as the log does.
+        message = _masked(str(exc), logger)
+        print(f"{error_prefix}: {message}", file=sys.stderr)  # ruff: ignore[print]
         raise SystemExit(1) from exc

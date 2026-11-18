@@ -6,6 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- `RedactFilter.install()` now also attaches to `urllib3.connection`,
+  `urllib3.poolmanager`, `httpcore.http11` and `httpcore.http2`. urllib3 2.x
+  logs the full request URL, query included, at WARNING when a response's
+  headers fail to parse (and at INFO when a `PoolManager` follows a
+  redirect), and httpcore logs response headers at DEBUG, where a redirect's
+  `Location` can repeat the query. A logger's filters only run on records
+  created on that logger, so those records reached root, `urllib3` or
+  `httpcore` handlers with the key in clear text even with the filter
+  installed as documented. `HTTP_LOGGERS` keeps its first three names and
+  order and gains the four new ones; a wrapper test that checks its exact
+  contents will see the difference.
+- `run()` now masks the `Error: <message>` line it prints for an expected
+  error with every `RedactFilter` attached to the `logger` it is given (for a
+  `LoggerAdapter`, the logger it wraps), as the DEBUG record of the same
+  error already was. A `requests` error quotes the request URL (connection
+  refused, timeout, DNS, proxy or TLS failure, or `raise_for_status()`), so
+  with the key in the query string the line printed it in clear. It now shows
+  `api_key=***`. Wrappers wired as the README shows need no change; a filter
+  on a parent logger or a handler is not used. A message without a secret is
+  printed exactly as before.
+- `DiskCache.put` now writes through a temp file created exclusively by
+  `tempfile.mkstemp` under a random name, instead of the guessable
+  `<entry>.<pid>.tmp` opened with a truncating open. Anyone who could write
+  the cache directory could plant a link at the old name and make the write
+  overwrite the link's target with the caller's privileges, and two puts of
+  the same key in one process could break each other. On POSIX, entries are
+  now created with mode `0o600` (owner only) instead of `0o666 & ~umask`, so
+  a cache directory shared between accounts no longer exposes them to the
+  others. `DiskCache.get` treats an entry that is not a regular file (a
+  symlink, FIFO or directory) as a miss instead of following or opening it.
+  Entry names, their JSON bytes and the atomic swap are unchanged.
+
 ### Fixed
 
 - On Windows, a clone whose path has non-ASCII characters (such as

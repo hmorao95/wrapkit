@@ -40,13 +40,13 @@ affected.
 
 | Module | What it gives a wrapper |
 |---|---|
-| `wrapkit.log` | `package_logger`, `configure_logging` (colored stderr console, plain DEBUG log file), `PlainFormatter`, `RedactFilter` (masks a key's query parameter and registered secrets on the `urllib3`/`httpx` loggers), `loggable` |
-| `wrapkit.cache` | the `DEFAULT_CACHE_DIR` sentinel, `resolve_cache_dir` (`None` or `""` = no cache), `cache_path` and `DiskCache` (JSON files named by a digest that leaves secrets out) |
+| `wrapkit.log` | `package_logger`, `configure_logging` (colored stderr console, plain DEBUG log file), `PlainFormatter`, `RedactFilter` (masks a key's query parameter and registered secrets on the `urllib3`/`httpcore`/`httpx` loggers), `loggable` |
+| `wrapkit.cache` | the `DEFAULT_CACHE_DIR` sentinel, `resolve_cache_dir` (`None` or `""` = no cache), `cache_path` and `DiskCache` (JSON files named by a digest that leaves secrets out, written through an exclusive temp file) |
 | `wrapkit.http` | `RetryPolicy` (429/5xx and transport errors, doubling backoff with jitter, numeric `Retry-After`, capped waits), `get_with_retries` (requests), `aget_with_retries` (httpx), `Throttle` / `AsyncThrottle`, `user_agent` |
 | `wrapkit.frames` | `tidy_frame` / `empty_tidy` (date, dimensions, value, unit), `as_polars`, `snake`, `period_start` / `period_end` (an end at year, quarter or month precision, such as `2024`, `2024-Q2`, `2024-06` or `Jun 2024`, covers the whole period) |
 | `wrapkit.incremental` | `key_strings`, `select_new`, `read_existing`, `upsert`: the pieces of `new_observations` and `update_csv` |
 | `wrapkit.io` | `write_frame` (CSV, Excel, Parquet or JSON by extension) |
-| `wrapkit.cli` | `resolve_out`, `as_text`, `bind_bool_flags`, `literal_keeping_codes`, `set_parse_fns`, and `run` (short `Error: ...` line and exit 1 for expected errors) |
+| `wrapkit.cli` | `resolve_out`, `as_text`, `bind_bool_flags`, `literal_keeping_codes`, `set_parse_fns`, and `run` (short `Error: ...` line, masked by the logger's `RedactFilter`, and exit 1 for expected errors) |
 
 ## Example
 

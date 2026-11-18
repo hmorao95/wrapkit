@@ -5,11 +5,26 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import pytest
+import requests
 from fire import decorators
 
-from wrapkit import cli
+from wrapkit import cli, log
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+#: A fake API key; the tests check it never reaches stderr in clear.
+_KEY = "DUMMYKEY12345"
+#: A second fake secret, masked by a second filter.
+_OTHER = "OTHERVALUE987"
+#: What requests says when the connection is refused (no request is sent).
+_REFUSED = (
+    "HTTPConnectionPool(host='127.0.0.1', port=9): Max retries exceeded with "
+    f"url: /v2?api_key={_KEY} (Caused by NewConnectionError('refused'))"
+)
 
 
 class _Tool:
@@ -59,6 +74,65 @@ class _Tool:
             object: ``codes``.
         """
         return codes
+
+
+class _Remote:
+    """A Fire CLI whose commands fail the way a keyed HTTP request does."""
+
+    @staticmethod
+    def refused() -> str:
+        """
+        Fail like a refused connection, quoting the request path and query.
+
+        Raises:
+            requests.ConnectionError: Always.
+        """
+        raise requests.ConnectionError(_REFUSED)
+
+    @staticmethod
+    def missing() -> None:
+        """
+        Fail like ``raise_for_status`` on a 404, quoting the full URL.
+
+        The response is built by hand and the URL only prepared, so nothing is
+        sent.
+
+        Raises:
+            requests.HTTPError: Always, from ``raise_for_status``.
+        """
+        resp = requests.Response()
+        resp.status_code = 404
+        resp.reason = "Not Found"
+        params = {"api_key": _KEY, "sig": _OTHER}
+        prepared = requests.Request(
+            "GET", "https://api.example.invalid/v2", params=params
+        ).prepare()
+        resp.url = prepared.url or ""
+        resp.raise_for_status()
+
+
+@pytest.fixture
+def keyed_logger() -> Iterator[logging.Logger]:
+    """
+    Yield a logger wired as the README shows, and unwire it afterwards.
+
+    ``RedactFilter(["api_key"]).install(name)`` attaches the filter to the
+    HTTP loggers and to the logger, and the key is registered. The filter is
+    removed from the HTTP loggers, and every filter from the logger, after the
+    test.
+
+    Yields:
+        logging.Logger: The logger ``wrapkit_cli_keyed_test``.
+    """
+    name = "wrapkit_cli_keyed_test"
+    flt = log.RedactFilter(["api_key"]).install(name)
+    flt.register(_KEY)
+    lg = log.package_logger(name)
+    yield lg
+    for http_name in log.HTTP_LOGGERS:
+        logging.getLogger(http_name).removeFilter(flt)
+    for added in list(lg.filters):
+        lg.removeFilter(added)
 
 
 def test_resolve_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -169,6 +243,115 @@ def test_run_expected_error_in_the_callers_words(
     assert capsys.readouterr().err.strip() == "Fehler: bad input"
     assert "Befehl fehlgeschlagen" in caplog.text
     assert "Command failed" not in caplog.text
+
+
+def test_run_masks_a_key_in_a_requests_error(
+    keyed_logger: logging.Logger,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A key quoted in a requests error is masked on stderr, as in the log."""
+    with (
+        caplog.at_level(logging.DEBUG, logger=keyed_logger.name),
+        pytest.raises(SystemExit) as info,
+    ):
+        cli.run(
+            _Remote,
+            name="tool",
+            logger=keyed_logger,
+            expected=(requests.RequestException,),
+            argv=["refused"],
+        )
+    assert info.value.code == 1
+    err = capsys.readouterr().err
+    assert _KEY not in err
+    assert "api_key=***" in err
+    assert err.strip() == "Error: " + _REFUSED.replace(_KEY, "***")
+    assert _KEY not in caplog.text
+    assert "api_key=***" in caplog.text
+
+
+def test_run_masks_with_the_filters_of_an_adapters_logger(
+    keyed_logger: logging.Logger, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A LoggerAdapter's records are made on its logger, so its filters mask."""
+    # run() is annotated for a Logger; an untyped wrapper may still pass this.
+    adapter = cast("logging.Logger", logging.LoggerAdapter(keyed_logger, {}))
+    with pytest.raises(SystemExit):
+        cli.run(
+            _Remote,
+            name="tool",
+            logger=adapter,
+            expected=(requests.RequestException,),
+            argv=["refused"],
+        )
+    err = capsys.readouterr().err
+    assert _KEY not in err
+    assert "api_key=***" in err
+
+
+def test_run_masks_a_url_with_every_redact_filter_on_the_logger(
+    keyed_logger: logging.Logger, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An HTTPError's URL is masked by each RedactFilter; other filters are skipped."""
+    keyed_logger.addFilter(logging.Filter())
+    keyed_logger.addFilter(log.RedactFilter(["sig"]))
+    with pytest.raises(SystemExit):
+        cli.run(
+            _Remote,
+            name="tool",
+            logger=keyed_logger,
+            expected=(requests.HTTPError,),
+            argv=["missing"],
+        )
+    err = capsys.readouterr().err
+    assert _KEY not in err
+    assert _OTHER not in err
+    assert err.strip() == (
+        "Error: 404 Client Error: Not Found for url: "
+        "https://api.example.invalid/v2?api_key=***&sig=***"
+    )
+
+
+def test_run_without_a_filter_prints_the_message_unchanged(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """With no RedactFilter on the logger, the message is printed as it is."""
+    lg = logging.getLogger("wrapkit_cli_plain_test")
+    assert not lg.filters
+    with pytest.raises(SystemExit):
+        cli.run(
+            _Remote,
+            name="tool",
+            logger=lg,
+            expected=(requests.RequestException,),
+            argv=["refused"],
+        )
+    assert capsys.readouterr().err.strip() == f"Error: {_REFUSED}"
+
+
+def test_run_does_not_use_a_parent_loggers_filter(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A parent logger's filter masks neither the child's record nor the line."""
+    parent = logging.getLogger("wrapkit_cli_parent_test")
+    child = logging.getLogger("wrapkit_cli_parent_test.child")
+    monkeypatch.setattr(parent, "filters", [log.RedactFilter(["api_key"])])
+    with (
+        caplog.at_level(logging.DEBUG, logger=child.name),
+        pytest.raises(SystemExit),
+    ):
+        cli.run(
+            _Remote,
+            name="tool",
+            logger=child,
+            expected=(requests.RequestException,),
+            argv=["refused"],
+        )
+    assert capsys.readouterr().err.strip() == f"Error: {_REFUSED}"
+    assert f"api_key={_KEY}" in caplog.text
 
 
 @pytest.mark.parametrize(
