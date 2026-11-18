@@ -185,7 +185,8 @@ class DiskCache:
             ``(False, None)``. A JSON ``null`` payload is a valid hit; a file
             that cannot be decoded (say, a truncated write) is a miss, and so
             is an entry that is not a regular file (a symlink, FIFO or
-            directory), which is never followed or opened.
+            directory), which is never followed or opened. An entry whose file
+            time is ahead of the clock is expired.
         """
         file = self.path(endpoint, params)
         if file is None:
@@ -201,10 +202,14 @@ class DiskCache:
             # directory or block for good on a FIFO.
             self._debug("Cache entry unreadable, ignored: %s", endpoint)
             return False, None
-        age = time.time() - info.st_mtime
-        # A TTL of zero (or less) means always refetch, even when the file's
-        # time is a hair ahead of the clock and the age comes out negative.
-        if self.ttl_seconds <= 0 or age >= self.ttl_seconds:
+        # Whole nanoseconds: in float seconds, a file written a moment ago can
+        # look a hair ahead of the clock.
+        age_ns = time.time_ns() - info.st_mtime_ns
+        age = age_ns / 1e9
+        # Fresh only while 0 <= age < TTL. A TTL of zero (or less) always
+        # refetches, and a file time ahead of the clock cannot be trusted: such
+        # an entry would otherwise stay fresh until the clock caught up.
+        if age_ns < 0 or not age < self.ttl_seconds:
             self._debug("Cache expired: %s (age %.0fs)", endpoint, age)
             return False, None
         try:

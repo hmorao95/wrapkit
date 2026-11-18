@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `DiskCache.get` treats an entry whose file time is ahead of the clock as
+  expired. With a positive TTL it used to serve such an entry as fresh until
+  the clock passed the file time plus the TTL. A file dated a day ahead (by
+  clock skew on a shared cache, or set by anyone who can touch the entry)
+  stayed fresh for a day plus the TTL. 0.2.8 fixed this for a TTL of zero
+  only. The age is now taken in whole nanoseconds, so an entry read right
+  after it is written is never mistaken for one dated ahead. An entry with a
+  future time is fetched again and rewritten, and logs `Cache expired`.
+
 ## [0.2.9] - 2026-11-18
 
 ### Security
