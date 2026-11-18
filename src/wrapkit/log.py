@@ -8,9 +8,14 @@ adds a colored console handler on stderr and, optionally, a plain-text DEBUG
 log file.
 
 API keys often travel in the query string, and both HTTP clients log full URLs
-(``urllib3`` at DEBUG, ``httpx`` at INFO). A :class:`RedactFilter` installed on
-those loggers masks the key's query parameter by pattern and every registered
-secret wherever it appears, without dropping any record.
+(``urllib3`` at DEBUG, and at WARNING when a response's headers fail to parse;
+``httpx`` at INFO), while ``httpcore``, the transport under ``httpx``, logs
+response headers at DEBUG. A :class:`RedactFilter` installed on those loggers
+masks the key's query parameter by pattern and every registered secret wherever
+it appears, without dropping any record. A logger's filters only see records
+created on that logger, not those its children pass up, so :data:`HTTP_LOGGERS`
+names each module logger that writes them rather than a parent such as
+``urllib3``.
 """
 
 from __future__ import annotations
@@ -41,8 +46,23 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 #: call replaces them instead of stacking duplicates.
 CLI_HANDLER_FLAG = "_wrapkit_cli_handler"
 
-#: Third-party loggers that write request URLs (and so any key in them).
-HTTP_LOGGERS = ("urllib3.connectionpool", "urllib3.util.retry", "httpx")
+#: Third-party loggers that write request URLs or HTTP headers (and so any key
+#: in them). Each is named exactly: a filter on a parent logger does not run on
+#: records from its children.
+HTTP_LOGGERS = (
+    "urllib3.connectionpool",
+    "urllib3.util.retry",
+    "httpx",
+    # urllib3 2.x: the request URL with its query, at WARNING, when a response's
+    # headers fail to parse; and "Redirecting <url> -> <location>" at INFO when a
+    # PoolManager follows a redirect.
+    "urllib3.connection",
+    "urllib3.poolmanager",
+    # httpcore: the response headers (a redirect's Location can repeat the
+    # query) in its DEBUG traces of HTTP/1.1 and HTTP/2 exchanges.
+    "httpcore.http11",
+    "httpcore.http2",
+)
 
 # Secrets shorter than this are not masked as plain text: replacing a tiny
 # string everywhere would mangle unrelated words. The query-parameter pattern

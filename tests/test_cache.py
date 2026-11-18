@@ -4,15 +4,47 @@ from __future__ import annotations
 
 import logging
 import os
+import stat
+import sys
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 from wrapkit import cache
 
-if TYPE_CHECKING:
-    from pathlib import Path
+
+def _temp_files(directory: Path) -> list[str]:
+    """
+    List the temp files in a cache directory.
+
+    Args:
+        directory (Path): The cache directory.
+
+    Returns:
+        list[str]: Sorted names of its ``*.tmp`` files.
+    """
+    return sorted(p.name for p in directory.iterdir() if p.suffix == ".tmp")
+
+
+def _link_or_skip(kind: str, link: Path, target: Path) -> None:
+    """
+    Create a hard or symbolic link, or skip the test where the OS refuses.
+
+    Creating a symlink on Windows needs a privilege (or Developer Mode).
+
+    Args:
+        kind (str): ``"hard"`` or ``"symbolic"``.
+        link (Path): Where the link goes.
+        target (Path): The file it points to.
+    """
+    try:
+        if kind == "hard":
+            link.hardlink_to(target)
+        else:
+            link.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"cannot create a {kind} link here: {exc}")
 
 
 def test_default_sentinel_repr() -> None:
@@ -124,6 +156,131 @@ def test_disk_cache_put_leaves_no_partial_file(
         store.put("e", [], {"a": 2})
     assert store.get("e", []) == (True, {"a": 1})
     assert [p.name for p in tmp_path.iterdir() if p.suffix == ".tmp"] == []
+
+
+@pytest.mark.parametrize("kind", ["hard", "symbolic"])
+def test_disk_cache_put_never_writes_through_a_planted_temp_name(
+    tmp_path: Path, kind: str
+) -> None:
+    """A link planted at the old guessable temp name, and its target, stay as they were."""
+    directory = tmp_path / "c"
+    store = cache.DiskCache(directory, 60.0)
+    file = store.path("e", [("x", "1")])
+    assert file is not None
+    canary = tmp_path / "canary.txt"
+    canary.write_text("CANARY", encoding="utf-8")
+    # The name put used to write, <entry>.<pid>.tmp: anyone who can write the
+    # directory could guess it and plant a link there first.
+    planted = file.with_name(f"{file.name}.{os.getpid()}.tmp")
+    _link_or_skip(kind, planted, canary)
+    store.put("e", [("x", "1")], {"a": 1})
+    assert canary.read_text(encoding="utf-8") == "CANARY"
+    assert _temp_files(directory) == [planted.name]
+    assert stat.S_ISREG(file.lstat().st_mode)
+    assert not file.samefile(canary)
+    assert file.read_bytes() == b'{"a": 1}'
+    assert store.get("e", [("x", "1")]) == (True, {"a": 1})
+
+
+def test_disk_cache_puts_never_share_a_temp_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second put of the same key, landing mid-put, writes its own temp file."""
+    store = cache.DiskCache(tmp_path, 60.0)
+    file = store.path("e", [])
+    assert file is not None
+    real_replace = Path.replace
+    temps: list[Path] = []
+
+    def _replace(self: Path, target: Path) -> Path:
+        """Run a whole second put between the first one's write and its swap."""
+        temps.append(self)
+        if len(temps) == 1:
+            store.put("e", [], {"by": "second"})
+        return real_replace(self, target)
+
+    monkeypatch.setattr("pathlib.Path.replace", _replace)
+    store.put("e", [], {"by": "first"})
+    first, second = temps
+    assert first != second
+    for temp in temps:
+        assert temp.parent == tmp_path
+        assert temp.name.startswith(f"{file.name}.")
+        assert temp.name.endswith(".tmp")
+        assert temp.name != f"{file.name}.{os.getpid()}.tmp"
+    # Each put swapped in its own complete file, so the last swap wins.
+    assert store.get("e", []) == (True, {"by": "first"})
+    assert _temp_files(tmp_path) == []
+
+
+def test_disk_cache_put_unserialisable_creates_nothing(tmp_path: Path) -> None:
+    """An answer JSON cannot encode raises before any file is created."""
+    store = cache.DiskCache(tmp_path, 60.0)
+    with pytest.raises(TypeError, match="not JSON serializable"):
+        store.put("e", [], {1, 2})
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+def test_disk_cache_entry_is_owner_only(tmp_path: Path) -> None:
+    """On POSIX an entry is created readable and writable by its owner only."""
+    store = cache.DiskCache(tmp_path, 60.0)
+    store.put("e", [], {"a": 1})
+    file = store.path("e", [])
+    assert file is not None
+    assert stat.S_IMODE(file.stat().st_mode) == 0o600
+
+
+def test_disk_cache_symlinked_entry_is_a_miss(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A symlink at the entry name is a miss, and put replaces the link itself."""
+    lg = logging.getLogger("wrapkit_cache_test")
+    store = cache.DiskCache(tmp_path / "c", 60.0, logger=lg)
+    file = store.path("e", [])
+    assert file is not None
+    target = tmp_path / "elsewhere.json"
+    target.write_text('{"a": 1}', encoding="utf-8")
+    _link_or_skip("symbolic", file, target)
+    with caplog.at_level(logging.DEBUG, logger="wrapkit_cache_test"):
+        assert store.get("e", []) == (False, None)
+    assert "unreadable" in caplog.text
+    store.put("e", [], {"a": 2})
+    assert target.read_text(encoding="utf-8") == '{"a": 1}'
+    assert not file.is_symlink()
+    assert store.get("e", []) == (True, {"a": 2})
+
+
+def test_disk_cache_entry_that_is_not_a_file_is_never_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A directory at the entry name is a miss, decided without opening it."""
+    lg = logging.getLogger("wrapkit_cache_test")
+    store = cache.DiskCache(tmp_path, 60.0, logger=lg)
+    file = store.path("e", [])
+    assert file is not None
+    file.mkdir()
+
+    def _no_read(*_a: object, **_k: object) -> str:
+        """Fail the test if get opens the entry."""
+        msg = "get opened an entry that is not a regular file"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr("pathlib.Path.read_text", _no_read)
+    with caplog.at_level(logging.DEBUG, logger="wrapkit_cache_test"):
+        assert store.get("e", []) == (False, None)
+    assert "unreadable" in caplog.text
+
+
+def test_disk_cache_fifo_entry_is_a_miss(tmp_path: Path) -> None:
+    """A FIFO at the entry name is a miss instead of blocking the read forever."""
+    if sys.platform == "win32":
+        pytest.skip("FIFOs are POSIX only")
+    store = cache.DiskCache(tmp_path, 60.0)
+    file = store.path("e", [])
+    assert file is not None
+    os.mkfifo(file)
+    assert store.get("e", []) == (False, None)
 
 
 def test_disk_cache_zero_ttl_never_hits(tmp_path: Path) -> None:

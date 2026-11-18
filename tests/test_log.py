@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,6 +13,23 @@ from wrapkit import log
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
+
+# Every logger in urllib3 2.x and httpcore 1.x that writes a request URL or HTTP
+# headers. A filter on a parent logger does not run on its children's records,
+# so install() must cover each of these names exactly.
+URL_OR_HEADER_LOGGERS = (
+    "urllib3.connectionpool",
+    "urllib3.util.retry",
+    "httpx",
+    "urllib3.connection",
+    "urllib3.poolmanager",
+    "httpcore.http11",
+    "httpcore.http2",
+)
+
+SECRET = "supersecretkey123"  # ruff: ignore[hardcoded-password-string] - a dummy key
+URL = f"https://h:443/v2/x?api_key={SECRET}&y=1"
+LOCATION = f"https://h/v2/x/?api_key={SECRET}"
 
 
 @pytest.fixture
@@ -92,8 +110,25 @@ def test_filter_freezes_cleaned_message(
     assert caplog.records[1].args == ("text",)
 
 
+@pytest.fixture
+def installed() -> Iterator[log.RedactFilter]:
+    """
+    Yield a filter installed as a wrapper does, then detach it everywhere.
+
+    Yields:
+        log.RedactFilter: A filter for ``api_key`` with :data:`SECRET`
+        registered, on the HTTP loggers and ``wrapkit_test``.
+    """
+    flt = log.RedactFilter(["api_key"]).install("wrapkit_test")
+    flt.register(SECRET)
+    yield flt
+    for name in (*log.HTTP_LOGGERS, "wrapkit_test"):
+        logging.getLogger(name).removeFilter(flt)
+
+
 def test_install_attaches_once() -> None:
     """install() covers the HTTP loggers and extra names, without duplicates."""
+    assert set(URL_OR_HEADER_LOGGERS) <= set(log.HTTP_LOGGERS)
     flt = log.RedactFilter(["api_key"])
     try:
         assert flt.install("wrapkit_test") is flt
@@ -103,6 +138,81 @@ def test_install_attaches_once() -> None:
     finally:
         for name in (*log.HTTP_LOGGERS, "wrapkit_test"):
             logging.getLogger(name).removeFilter(flt)
+
+
+@pytest.mark.parametrize(
+    ("name", "level", "msg", "args"),
+    [
+        # urllib3/connection.py: a response header block that fails to parse.
+        pytest.param(
+            "urllib3.connection",
+            logging.WARNING,
+            "Failed to parse headers (url=%s): %s",
+            (URL, "[MissingHeaderBodySeparatorDefect()], unparsed data: ''"),
+            id="urllib3.connection",
+        ),
+        # urllib3/poolmanager.py: a redirect followed by a PoolManager.
+        pytest.param(
+            "urllib3.poolmanager",
+            logging.INFO,
+            "Redirecting %s -> %s",
+            (URL, LOCATION),
+            id="urllib3.poolmanager",
+        ),
+        # httpcore/_trace.py formats the message itself; these are the
+        # response-header traces of http11.py and http2.py.
+        pytest.param(
+            "httpcore.http11",
+            logging.DEBUG,
+            "receive_response_headers.complete return_value="
+            + repr(
+                (
+                    b"HTTP/1.1",
+                    301,
+                    b"Moved Permanently",
+                    [(b"Location", LOCATION.encode()), (b"X-Echo", SECRET.encode())],
+                )
+            ),
+            (),
+            id="httpcore.http11",
+        ),
+        pytest.param(
+            "httpcore.http2",
+            logging.DEBUG,
+            "receive_response_headers.complete return_value="
+            + repr((301, [(b"location", LOCATION.encode())])),
+            (),
+            id="httpcore.http2",
+        ),
+    ],
+)
+def test_install_masks_child_http_loggers(
+    installed: log.RedactFilter,
+    caplog: pytest.LogCaptureFixture,
+    name: str,
+    level: int,
+    msg: str,
+    args: tuple[object, ...],
+) -> None:
+    """A key logged on a URL- or header-writing logger reaches handlers masked."""
+    assert installed in logging.getLogger(name).filters
+    # A handler on the parent ("urllib3" or "httpcore"), besides caplog's on root.
+    parent = logging.getLogger(name.split(".", maxsplit=1)[0])
+    buffer = logging.handlers.BufferingHandler(capacity=100)
+    parent.addHandler(buffer)
+    try:
+        with caplog.at_level(logging.DEBUG, logger=name):
+            logging.getLogger(name).log(level, msg, *args)
+        at_parent = [r.getMessage() for r in buffer.buffer]
+    finally:
+        parent.removeHandler(buffer)
+        buffer.close()
+    at_root = [r.getMessage() for r in caplog.records if r.name == name]
+    assert len(at_root) == len(at_parent) == 1
+    for message in (*at_root, *at_parent):
+        assert SECRET not in message
+        assert "api_key=***" in message
+    assert SECRET not in caplog.text
 
 
 def test_loggable_hides_names() -> None:

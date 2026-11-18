@@ -18,6 +18,8 @@ import enum
 import hashlib
 import json
 import os
+import stat
+import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
@@ -181,12 +183,25 @@ class DiskCache:
         Returns:
             tuple[bool, Any]: ``(True, payload)`` on a fresh hit, otherwise
             ``(False, None)``. A JSON ``null`` payload is a valid hit; a file
-            that cannot be decoded (say, a truncated write) is a miss.
+            that cannot be decoded (say, a truncated write) is a miss, and so
+            is an entry that is not a regular file (a symlink, FIFO or
+            directory), which is never followed or opened.
         """
         file = self.path(endpoint, params)
-        if file is None or not file.exists():
+        if file is None:
             return False, None
-        age = time.time() - file.stat().st_mtime
+        try:
+            # lstat, not stat: a symlink at the entry name is not followed.
+            info = file.lstat()
+        except OSError:
+            return False, None
+        if not stat.S_ISREG(info.st_mode):
+            # put only ever leaves a regular file here. Anything else was put
+            # there by someone else; reading it could follow a link out of the
+            # directory or block for good on a FIFO.
+            self._debug("Cache entry unreadable, ignored: %s", endpoint)
+            return False, None
+        age = time.time() - info.st_mtime
         # A TTL of zero (or less) means always refetch, even when the file's
         # time is a hair ahead of the clock and the age comes out negative.
         if self.ttl_seconds <= 0 or age >= self.ttl_seconds:
@@ -206,21 +221,39 @@ class DiskCache:
         """
         Store an answer (a no-op when caching is off).
 
+        The answer is written to a new temp file in the cache directory, which
+        then replaces the entry, so a reader never sees a half-written entry
+        and an interrupted write leaves none. The temp file is created
+        exclusively, under a random name and with mode ``0o600`` on POSIX
+        (which the entry keeps), so it is never a file or link someone else
+        put there, nor the temp file of another put of the same key.
+
         Args:
             endpoint (str): The path or URL that was requested.
             params (Sequence[tuple[str, Any]] | None): Request parameters.
             payload (object): A JSON-serialisable answer.
         """
         file = self.path(endpoint, params)
-        if file is not None:
-            # Write a sibling temp file, then swap it in, so a reader never
-            # sees a half-written entry and an interrupted write leaves none.
-            temp = file.with_name(f"{file.name}.{os.getpid()}.tmp")
-            try:
-                temp.write_text(json.dumps(payload), encoding="utf-8")
-                temp.replace(file)
-            finally:
-                temp.unlink(missing_ok=True)
+        if file is None:
+            return
+        # Encode first: an answer JSON cannot encode raises before any file
+        # exists.
+        text = json.dumps(payload)
+        # mkstemp opens with O_CREAT | O_EXCL (plus O_NOFOLLOW where the OS has
+        # it) and mode 0o600, drawing a new random name if one is taken.
+        fd, name = tempfile.mkstemp(
+            dir=file.parent, prefix=f"{file.name}.", suffix=".tmp"
+        )
+        temp = Path(name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(text)
+            # A rename replaces whatever sits at the entry name, a symlink
+            # included, without following it.
+            temp.replace(file)
+        except BaseException:
+            temp.unlink(missing_ok=True)
+            raise
 
     def _debug(self, msg: str, *args: object) -> None:
         """
